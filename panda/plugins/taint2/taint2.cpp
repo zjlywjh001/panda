@@ -113,6 +113,7 @@ bool tainted_pointer = true;
 bool optimize_llvm = true;
 extern bool inline_taint;
 bool debug_taint = false;
+bool enable_taint_after_startup = false;
 
 /*
  * These memory callbacks are only for whole-system mode.  User-mode memory
@@ -399,7 +400,7 @@ void lava_attack_point(PandaHypercallStruct phs) {
 // Support all features of label and query program
 void i386_hypercall_callback(CPUState *cpu){
     CPUArchState *env = (CPUArchState*)cpu->env_ptr;
-    if (taintEnabled && pandalog) {
+    if (pandalog && taintEnabled) {
         // LAVA Hypercall
         target_ulong addr = panda_virt_to_phys(cpu, env->regs[R_EAX]);
         if ((int)addr == -1) {
@@ -414,6 +415,8 @@ void i386_hypercall_callback(CPUState *cpu){
             panda_virtual_memory_rw(cpu, env->regs[R_EAX], (uint8_t *) &phs, sizeof(phs), false);
             if (phs.magic == 0xabcd) {
                 if  (phs.action == 11) {
+                    printf ("panda hypercall with ptr to valid PandaHypercallStruct: vaddr=0x%x paddr=0x%x\n",
+                            (uint32_t) env->regs[R_EAX], (uint32_t) addr);
                     // it's a lava query
                     taint_query_hypercall(phs);
                 }
@@ -428,6 +431,17 @@ void i386_hypercall_callback(CPUState *cpu){
                 }
                 else if (phs.action == 14) {
                     // reserved for taint-exploitability
+                }
+                else if (phs.action == 15) {
+                    // standard taint label
+                    printf("taint2: single taint label\n");
+                    taint2_add_taint_ram_single_label(cpu, phs.buf,
+                        phs.len, phs.label_num);
+                }
+                else if (phs.action == 16) {
+                    // positional taint label
+                    printf("taint2: positional taint label\n");
+                    taint2_add_taint_ram_pos(cpu, phs.buf, phs.len);
                 }
                 else {
                     printf("Unknown hypercall action %d\n", phs.action);
@@ -478,6 +492,7 @@ void taint_state_changed(FastShad *fast_shad, uint64_t shad_addr, uint64_t size)
 }
 
 bool before_block_exec_invalidate_opt(CPUState *cpu, TranslationBlock *tb) {
+    if (enable_taint_after_startup) taint2_enable_taint();
     if (taintEnabled) {
         return tb->llvm_tc_ptr ? false : true /* invalidate! */;
     }
@@ -511,6 +526,8 @@ bool init_plugin(void *self) {
     }
     optimize_llvm = panda_parse_bool_opt(args, "opt", "run LLVM optimization on taint");
     debug_taint = panda_parse_bool_opt(args, "debug", "enable taint debugging");
+    enable_taint_after_startup = panda_parse_bool_opt(args, "enable",
+        "enable taint on QEMU startup");
 
     panda_require("callstack_instr");
     assert(init_callstack_instr_api());
