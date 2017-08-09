@@ -251,6 +251,8 @@ static void apic_reset_common(DeviceState *dev)
     s->apicbase = APIC_DEFAULT_ADDRESS | bsp | MSR_IA32_APICBASE_ENABLE;
     s->id = s->initial_apic_id;
 
+    apic_reset_irq_delivered();
+
     s->vapic_paddr = 0;
     info->vapic_base_update(s);
 
@@ -329,7 +331,7 @@ static void apic_common_realize(DeviceState *dev, Error **errp)
         instance_id = -1;
     }
     vmstate_register_with_alias_id(NULL, instance_id, &vmstate_apic_common,
-                                   s, -1, 0);
+                                   s, -1, 0, NULL);
 }
 
 static void apic_common_unrealize(DeviceState *dev, Error **errp)
@@ -385,25 +387,6 @@ static bool apic_common_sipi_needed(void *opaque)
     return s->wait_for_sipi != 0;
 }
 
-static bool apic_irq_delivered_needed(void *opaque)
-{
-    APICCommonState *s = APIC_COMMON(opaque);
-    return s->cpu == X86_CPU(first_cpu) && apic_irq_delivered != 0;
-}
-
-static void apic_irq_delivered_pre_save(void *opaque)
-{
-    APICCommonState *s = APIC_COMMON(opaque);
-    s->apic_irq_delivered = apic_irq_delivered;
-}
-
-static int apic_irq_delivered_post_load(void *opaque, int version_id)
-{
-    APICCommonState *s = APIC_COMMON(opaque);
-    apic_irq_delivered = s->apic_irq_delivered;
-    return 0;
-}
-
 static const VMStateDescription vmstate_apic_common_sipi = {
     .name = "apic_sipi",
     .version_id = 1,
@@ -412,19 +395,6 @@ static const VMStateDescription vmstate_apic_common_sipi = {
     .fields = (VMStateField[]) {
         VMSTATE_INT32(sipi_vector, APICCommonState),
         VMSTATE_INT32(wait_for_sipi, APICCommonState),
-        VMSTATE_END_OF_LIST()
-    }
-};
-
-static const VMStateDescription vmstate_apic_irq_delivered = {
-    .name = "apic_irq_delivered",
-    .version_id = 1,
-    .minimum_version_id = 1,
-    .needed = apic_irq_delivered_needed,
-    .pre_save = apic_irq_delivered_pre_save,
-    .post_load = apic_irq_delivered_post_load,
-    .fields = (VMStateField[]) {
-        VMSTATE_INT32(apic_irq_delivered, APICCommonState),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -463,7 +433,6 @@ static const VMStateDescription vmstate_apic_common = {
     },
     .subsections = (const VMStateDescription*[]) {
         &vmstate_apic_common_sipi,
-        &vmstate_apic_irq_delivered,
         NULL
     }
 };
@@ -481,10 +450,10 @@ static void apic_common_get_id(Object *obj, Visitor *v, const char *name,
                                void *opaque, Error **errp)
 {
     APICCommonState *s = APIC_COMMON(obj);
-    int64_t value;
+    uint32_t value;
 
     value = s->apicbase & MSR_IA32_APICBASE_EXTD ? s->initial_apic_id : s->id;
-    visit_type_int(v, name, &value, errp);
+    visit_type_uint32(v, name, &value, errp);
 }
 
 static void apic_common_set_id(Object *obj, Visitor *v, const char *name,
@@ -493,14 +462,14 @@ static void apic_common_set_id(Object *obj, Visitor *v, const char *name,
     APICCommonState *s = APIC_COMMON(obj);
     DeviceState *dev = DEVICE(obj);
     Error *local_err = NULL;
-    int64_t value;
+    uint32_t value;
 
     if (dev->realized) {
         qdev_prop_set_after_realize(dev, name, errp);
         return;
     }
 
-    visit_type_int(v, name, &value, &local_err);
+    visit_type_uint32(v, name, &value, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -515,7 +484,7 @@ static void apic_common_initfn(Object *obj)
     APICCommonState *s = APIC_COMMON(obj);
 
     s->id = s->initial_apic_id = -1;
-    object_property_add(obj, "id", "int",
+    object_property_add(obj, "id", "uint32",
                         apic_common_get_id,
                         apic_common_set_id, NULL, NULL, NULL);
 }
@@ -532,7 +501,7 @@ static void apic_common_class_init(ObjectClass *klass, void *data)
      * Reason: APIC and CPU need to be wired up by
      * x86_cpu_apic_create()
      */
-    dc->cannot_instantiate_with_device_add_yet = true;
+    dc->user_creatable = false;
 }
 
 static const TypeInfo apic_common_type = {

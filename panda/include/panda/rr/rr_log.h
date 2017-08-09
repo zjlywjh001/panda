@@ -99,7 +99,7 @@ typedef struct rr_log_entry_t {
         // if log_entry.kind == RR_INPUT_8
         uint64_t input_8;
         // if log_entry.kind == RR_INTERRUPT_REQUEST
-        int32_t interrupt_request; // mz 2-bytes is enough for the interrupt
+        uint32_t interrupt_request; // mz 2-bytes is enough for the interrupt
                                     // request value!
         // if log_entry.kind == RR_EXIT_REQUEST
         uint16_t exit_request;

@@ -14,6 +14,9 @@
 #include "migration/migration.h"
 #include "include/exec/address-spaces.h"
 #include "migration/qemu-file.h"
+#include "migration/qemu-file-channel.h"
+#include "migration/global_state.h"
+#include "migration/savevm.h"
 #include "io/channel-file.h"
 #include "sysemu/sysemu.h"
 

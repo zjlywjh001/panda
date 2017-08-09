@@ -12,14 +12,14 @@
 /* GLOBALS */
 /******************************************************************************************/
 //mz record/replay mode
-volatile RR_mode rr_mode = RR_REPLAY;
+RR_mode rr_mode = RR_REPLAY;
 
 //mz program execution state
 
 //mz 11.06.2009 Flags to manage nested recording
-volatile sig_atomic_t rr_record_in_progress = 0;
-volatile sig_atomic_t rr_record_in_main_loop_wait = 0;
-volatile sig_atomic_t rr_skipped_callsite_location = 0;
+bool rr_record_in_progress = 0;
+bool rr_record_in_main_loop_wait = 0;
+bool rr_skipped_callsite_location = 0;
 
 //mz the log of non-deterministic events
 RR_log *rr_nondet_log = NULL;
@@ -37,10 +37,10 @@ static inline uint8_t log_is_empty(void) {
 RR_debug_level_type rr_debug_level = RR_DEBUG_WHISPER;
 
 //mz Flags set by monitor to indicate requested record/replay action
-volatile sig_atomic_t rr_replay_requested = 0;
-volatile sig_atomic_t rr_record_requested = 0;
-volatile sig_atomic_t rr_end_record_requested = 0;
-volatile sig_atomic_t rr_end_replay_requested = 0;
+bool rr_replay_requested = 0;
+int rr_record_requested = 0;
+bool rr_end_record_requested = 0;
+bool rr_end_replay_requested = 0;
 char * rr_requested_name = NULL;
 
 // write this program point to this file 

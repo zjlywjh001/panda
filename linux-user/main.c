@@ -574,6 +574,7 @@ void cpu_loop(CPUARMState *env)
         switch(trapnr) {
         case EXCP_UDEF:
         case EXCP_NOCP:
+        case EXCP_INVSTATE:
             {
                 TaskState *ts = cs->opaque;
                 uint32_t opcode;
@@ -1712,10 +1713,12 @@ void cpu_loop(CPUPPCState *env)
              * in syscalls.
              */
             env->crf[0] &= ~0x1;
+            env->nip += 4;
             ret = do_syscall(env, env->gpr[0], env->gpr[3], env->gpr[4],
                              env->gpr[5], env->gpr[6], env->gpr[7],
                              env->gpr[8], 0, 0);
             if (ret == -TARGET_ERESTARTSYS) {
+                env->nip -= 4;
                 break;
             }
             if (ret == (target_ulong)(-TARGET_QEMU_ESIGRETURN)) {
@@ -1723,7 +1726,6 @@ void cpu_loop(CPUPPCState *env)
                    Avoid corrupting register state.  */
                 break;
             }
-            env->nip += 4;
             if (ret > (target_ulong)(-515)) {
                 env->crf[0] |= 0x1;
                 ret = -ret;
@@ -2574,94 +2576,81 @@ kuser_fail:
 void cpu_loop(CPUOpenRISCState *env)
 {
     CPUState *cs = CPU(openrisc_env_get_cpu(env));
-    int trapnr, gdbsig;
+    int trapnr;
     abi_long ret;
+    target_siginfo_t info;
 
     for (;;) {
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
         cpu_exec_end(cs);
         process_queued_cpu_work(cs);
-        gdbsig = 0;
 
         switch (trapnr) {
-        case EXCP_RESET:
-            qemu_log_mask(CPU_LOG_INT, "\nReset request, exit, pc is %#x\n", env->pc);
-            exit(EXIT_FAILURE);
-            break;
-        case EXCP_BUSERR:
-            qemu_log_mask(CPU_LOG_INT, "\nBus error, exit, pc is %#x\n", env->pc);
-            gdbsig = TARGET_SIGBUS;
-            break;
-        case EXCP_DPF:
-        case EXCP_IPF:
-            cpu_dump_state(cs, stderr, fprintf, 0);
-            gdbsig = TARGET_SIGSEGV;
-            break;
-        case EXCP_TICK:
-            qemu_log_mask(CPU_LOG_INT, "\nTick time interrupt pc is %#x\n", env->pc);
-            break;
-        case EXCP_ALIGN:
-            qemu_log_mask(CPU_LOG_INT, "\nAlignment pc is %#x\n", env->pc);
-            gdbsig = TARGET_SIGBUS;
-            break;
-        case EXCP_ILLEGAL:
-            qemu_log_mask(CPU_LOG_INT, "\nIllegal instructionpc is %#x\n", env->pc);
-            gdbsig = TARGET_SIGILL;
-            break;
-        case EXCP_INT:
-            qemu_log_mask(CPU_LOG_INT, "\nExternal interruptpc is %#x\n", env->pc);
-            break;
-        case EXCP_DTLBMISS:
-        case EXCP_ITLBMISS:
-            qemu_log_mask(CPU_LOG_INT, "\nTLB miss\n");
-            break;
-        case EXCP_RANGE:
-            qemu_log_mask(CPU_LOG_INT, "\nRange\n");
-            gdbsig = TARGET_SIGSEGV;
-            break;
         case EXCP_SYSCALL:
             env->pc += 4;   /* 0xc00; */
             ret = do_syscall(env,
-                             env->gpr[11], /* return value       */
-                             env->gpr[3],  /* r3 - r7 are params */
-                             env->gpr[4],
-                             env->gpr[5],
-                             env->gpr[6],
-                             env->gpr[7],
-                             env->gpr[8], 0, 0);
+                             cpu_get_gpr(env, 11), /* return value       */
+                             cpu_get_gpr(env, 3),  /* r3 - r7 are params */
+                             cpu_get_gpr(env, 4),
+                             cpu_get_gpr(env, 5),
+                             cpu_get_gpr(env, 6),
+                             cpu_get_gpr(env, 7),
+                             cpu_get_gpr(env, 8), 0, 0);
             if (ret == -TARGET_ERESTARTSYS) {
                 env->pc -= 4;
             } else if (ret != -TARGET_QEMU_ESIGRETURN) {
-                env->gpr[11] = ret;
+                cpu_set_gpr(env, 11, ret);
             }
             break;
+        case EXCP_DPF:
+        case EXCP_IPF:
+        case EXCP_RANGE:
+            info.si_signo = TARGET_SIGSEGV;
+            info.si_errno = 0;
+            info.si_code = TARGET_SEGV_MAPERR;
+            info._sifields._sigfault._addr = env->pc;
+            queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
+            break;
+        case EXCP_ALIGN:
+            info.si_signo = TARGET_SIGBUS;
+            info.si_errno = 0;
+            info.si_code = TARGET_BUS_ADRALN;
+            info._sifields._sigfault._addr = env->pc;
+            queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
+            break;
+        case EXCP_ILLEGAL:
+            info.si_signo = TARGET_SIGILL;
+            info.si_errno = 0;
+            info.si_code = TARGET_ILL_ILLOPC;
+            info._sifields._sigfault._addr = env->pc;
+            queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
+            break;
         case EXCP_FPE:
-            qemu_log_mask(CPU_LOG_INT, "\nFloating point error\n");
+            info.si_signo = TARGET_SIGFPE;
+            info.si_errno = 0;
+            info.si_code = 0;
+            info._sifields._sigfault._addr = env->pc;
+            queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
             break;
-        case EXCP_TRAP:
-            qemu_log_mask(CPU_LOG_INT, "\nTrap\n");
-            gdbsig = TARGET_SIGTRAP;
+        case EXCP_INTERRUPT:
+            /* We processed the pending cpu work above.  */
             break;
-        case EXCP_NR:
-            qemu_log_mask(CPU_LOG_INT, "\nNR\n");
+        case EXCP_DEBUG:
+            trapnr = gdb_handlesig(cs, TARGET_SIGTRAP);
+            if (trapnr) {
+                info.si_signo = trapnr;
+                info.si_errno = 0;
+                info.si_code = TARGET_TRAP_BRKPT;
+                queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
+            }
             break;
         case EXCP_ATOMIC:
             cpu_exec_step_atomic(cs);
             break;
         default:
-            EXCP_DUMP(env, "\nqemu: unhandled CPU exception %#x - aborting\n",
-                     trapnr);
-            gdbsig = TARGET_SIGILL;
-            break;
+            g_assert_not_reached();
         }
-        if (gdbsig) {
-            gdb_handlesig(cs, gdbsig);
-            if (gdbsig != TARGET_SIGTRAP) {
-                exit(EXIT_FAILURE);
-            }
-        }
-
         process_pending_signals(env);
     }
 }
@@ -3048,15 +3037,12 @@ void cpu_loop(CPUAlphaState *env)
     abi_long sysret;
 
     while (1) {
+        bool arch_interrupt = true;
+
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
         cpu_exec_end(cs);
         process_queued_cpu_work(cs);
-
-        /* All of the traps imply a transition through PALcode, which
-           implies an REI instruction has been executed.  Which means
-           that the intr_flag should be cleared.  */
-        env->intr_flag = 0;
 
         switch (trapnr) {
         case EXCP_RESET:
@@ -3074,7 +3060,6 @@ void cpu_loop(CPUAlphaState *env)
             exit(EXIT_FAILURE);
             break;
         case EXCP_MMFAULT:
-            env->lock_addr = -1;
             info.si_signo = TARGET_SIGSEGV;
             info.si_errno = 0;
             info.si_code = (page_get_flags(env->trap_arg0) & PAGE_VALID
@@ -3083,7 +3068,6 @@ void cpu_loop(CPUAlphaState *env)
             queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
             break;
         case EXCP_UNALIGN:
-            env->lock_addr = -1;
             info.si_signo = TARGET_SIGBUS;
             info.si_errno = 0;
             info.si_code = TARGET_BUS_ADRALN;
@@ -3092,7 +3076,6 @@ void cpu_loop(CPUAlphaState *env)
             break;
         case EXCP_OPCDEC:
         do_sigill:
-            env->lock_addr = -1;
             info.si_signo = TARGET_SIGILL;
             info.si_errno = 0;
             info.si_code = TARGET_ILL_ILLOPC;
@@ -3100,7 +3083,6 @@ void cpu_loop(CPUAlphaState *env)
             queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
             break;
         case EXCP_ARITH:
-            env->lock_addr = -1;
             info.si_signo = TARGET_SIGFPE;
             info.si_errno = 0;
             info.si_code = TARGET_FPE_FLTINV;
@@ -3111,7 +3093,6 @@ void cpu_loop(CPUAlphaState *env)
             /* No-op.  Linux simply re-enables the FPU.  */
             break;
         case EXCP_CALL_PAL:
-            env->lock_addr = -1;
             switch (env->error_code) {
             case 0x80:
                 /* BPT */
@@ -3208,10 +3189,11 @@ void cpu_loop(CPUAlphaState *env)
         case EXCP_DEBUG:
             info.si_signo = gdb_handlesig(cs, TARGET_SIGTRAP);
             if (info.si_signo) {
-                env->lock_addr = -1;
                 info.si_errno = 0;
                 info.si_code = TARGET_TRAP_BRKPT;
                 queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
+            } else {
+                arch_interrupt = false;
             }
             break;
         case EXCP_INTERRUPT:
@@ -3219,6 +3201,7 @@ void cpu_loop(CPUAlphaState *env)
             break;
         case EXCP_ATOMIC:
             cpu_exec_step_atomic(cs);
+            arch_interrupt = false;
             break;
         default:
             printf ("Unhandled trap: 0x%x\n", trapnr);
@@ -3226,6 +3209,15 @@ void cpu_loop(CPUAlphaState *env)
             exit(EXIT_FAILURE);
         }
         process_pending_signals (env);
+
+        /* Most of the traps imply a transition through PALcode, which
+           implies an REI instruction has been executed.  Which means
+           that RX and LOCK_ADDR should be cleared.  But there are a
+           few exceptions for traps internal to QEMU.  */
+        if (arch_interrupt) {
+            env->flags &= ~ENV_FLAG_RX_FLAG;
+            env->lock_addr = -1;
+        }
     }
 }
 #endif /* TARGET_ALPHA */
@@ -4144,7 +4136,9 @@ static void usage(int exitcode)
            "    -E var1=val2,var2=val2 -U LD_PRELOAD,LD_DEBUG\n"
            "    QEMU_SET_ENV=var1=val2,var2=val2 QEMU_UNSET_ENV=LD_PRELOAD,LD_DEBUG\n"
            "Note that if you provide several changes to a single variable\n"
-           "the last change will stay in effect.\n");
+           "the last change will stay in effect.\n"
+           "\n"
+           QEMU_HELP_BOTTOM "\n");
 
     exit(exitcode);
 }
@@ -4240,10 +4234,7 @@ int main(int argc, char **argv, char **envp)
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
 
-    if ((envlist = envlist_create()) == NULL) {
-        (void) fprintf(stderr, "Unable to allocate envlist\n");
-        exit(EXIT_FAILURE);
-    }
+    envlist = envlist_create();
 
     /* add current environment into the list */
     for (wrk = environ; *wrk != NULL; wrk++) {
@@ -4440,10 +4431,10 @@ int main(int argc, char **argv, char **envp)
     }
 
     for (wrk = target_environ; *wrk; wrk++) {
-        free(*wrk);
+        g_free(*wrk);
     }
 
-    free(target_environ);
+    g_free(target_environ);
 
     if (qemu_loglevel_mask(CPU_LOG_PAGE)) {
         qemu_log("guest_base  0x%lx\n", guest_base);
@@ -4776,11 +4767,10 @@ int main(int argc, char **argv, char **envp)
         int i;
 
         for (i = 0; i < 32; i++) {
-            env->gpr[i] = regs->gpr[i];
+            cpu_set_gpr(env, i, regs->gpr[i]);
         }
-
-        env->sr = regs->sr;
         env->pc = regs->pc;
+        cpu_set_sr(env, regs->sr);
     }
 #elif defined(TARGET_SH4)
     {

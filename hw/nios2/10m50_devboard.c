@@ -57,19 +57,19 @@ static void nios2_10m50_ghrd_init(MachineState *machine)
     int i;
 
     /* Physical TCM (tb_ram_1k) with alias at 0xc0000000 */
-    memory_region_init_ram(phys_tcm, NULL, "nios2.tcm", tcm_size, &error_abort);
+    memory_region_init_ram(phys_tcm, NULL, "nios2.tcm", tcm_size,
+                           &error_abort);
     memory_region_init_alias(phys_tcm_alias, NULL, "nios2.tcm.alias",
                              phys_tcm, 0, tcm_size);
-    vmstate_register_ram_global(phys_tcm);
     memory_region_add_subregion(address_space_mem, tcm_base, phys_tcm);
     memory_region_add_subregion(address_space_mem, 0xc0000000 + tcm_base,
                                 phys_tcm_alias);
 
     /* Physical DRAM with alias at 0xc0000000 */
-    memory_region_init_ram(phys_ram, NULL, "nios2.ram", ram_size, &error_abort);
+    memory_region_init_ram(phys_ram, NULL, "nios2.ram", ram_size,
+                           &error_abort);
     memory_region_init_alias(phys_ram_alias, NULL, "nios2.ram.alias",
                              phys_ram, 0, ram_size);
-    vmstate_register_ram_global(phys_ram);
     memory_region_add_subregion(address_space_mem, ram_base, phys_ram);
     memory_region_add_subregion(address_space_mem, 0xc0000000 + ram_base,
                                 phys_ram_alias);
@@ -82,7 +82,8 @@ static void nios2_10m50_ghrd_init(MachineState *machine)
 
     /* Register: Internal Interrupt Controller (IIC) */
     dev = qdev_create(NULL, "altera,iic");
-    qdev_prop_set_ptr(dev, "cpu", cpu);
+    object_property_add_const_link(OBJECT(dev), "cpu", OBJECT(cpu),
+                                   &error_abort);
     qdev_init_nofail(dev);
     sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, cpu_irq[0]);
     for (i = 0; i < 32; i++) {

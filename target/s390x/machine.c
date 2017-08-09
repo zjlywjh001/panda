@@ -34,6 +34,7 @@ static int cpu_post_load(void *opaque, int version_id)
 
     return 0;
 }
+
 static void cpu_pre_save(void *opaque)
 {
     S390CPU *cpu = opaque;
@@ -156,6 +157,39 @@ const VMStateDescription vmstate_riccb = {
     }
 };
 
+static bool exval_needed(void *opaque)
+{
+    S390CPU *cpu = opaque;
+    return cpu->env.ex_value != 0;
+}
+
+const VMStateDescription vmstate_exval = {
+    .name = "cpu/exval",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = exval_needed,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT64(env.ex_value, S390CPU),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static bool gscb_needed(void *opaque)
+{
+    return kvm_s390_get_gs();
+}
+
+const VMStateDescription vmstate_gscb = {
+    .name = "cpu/gscb",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = gscb_needed,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT64_ARRAY(env.gscb, S390CPU, 4),
+        VMSTATE_END_OF_LIST()
+        }
+};
+
 const VMStateDescription vmstate_s390_cpu = {
     .name = "cpu",
     .post_load = cpu_post_load,
@@ -180,7 +214,7 @@ const VMStateDescription vmstate_s390_cpu = {
         VMSTATE_UINT8(env.cpu_state, S390CPU),
         VMSTATE_UINT8(env.sigp_order, S390CPU),
         VMSTATE_UINT32_V(irqstate_saved_size, S390CPU, 4),
-        VMSTATE_VBUFFER_UINT32(irqstate, S390CPU, 4, NULL, 0,
+        VMSTATE_VBUFFER_UINT32(irqstate, S390CPU, 4, NULL,
                                irqstate_saved_size),
         VMSTATE_END_OF_LIST()
     },
@@ -188,6 +222,8 @@ const VMStateDescription vmstate_s390_cpu = {
         &vmstate_fpu,
         &vmstate_vregs,
         &vmstate_riccb,
+        &vmstate_exval,
+        &vmstate_gscb,
         NULL
     },
 };

@@ -101,21 +101,27 @@ void a64_translate_init(void)
         offsetof(CPUARMState, exclusive_high), "exclusive_high");
 }
 
-static inline ARMMMUIdx get_a64_user_mem_index(DisasContext *s)
+static inline int get_a64_user_mem_index(DisasContext *s)
 {
-    /* Return the mmu_idx to use for A64 "unprivileged load/store" insns:
+    /* Return the core mmu_idx to use for A64 "unprivileged load/store" insns:
      *  if EL1, access as if EL0; otherwise access at current EL
      */
+    ARMMMUIdx useridx;
+
     switch (s->mmu_idx) {
     case ARMMMUIdx_S12NSE1:
-        return ARMMMUIdx_S12NSE0;
+        useridx = ARMMMUIdx_S12NSE0;
+        break;
     case ARMMMUIdx_S1SE1:
-        return ARMMMUIdx_S1SE0;
+        useridx = ARMMMUIdx_S1SE0;
+        break;
     case ARMMMUIdx_S2NS:
         g_assert_not_reached();
     default:
-        return s->mmu_idx;
+        useridx = s->mmu_idx;
+        break;
     }
+    return arm_to_core_mmu_idx(useridx);
 }
 
 void aarch64_cpu_dump_state(CPUState *cs, FILE *f,
@@ -373,24 +379,10 @@ static inline void gen_goto_tb(DisasContext *s, int n, uint64_t dest)
         } else if (s->singlestep_enabled) {
             gen_exception_internal(EXCP_DEBUG);
         } else {
-            tcg_gen_exit_tb(0);
+            tcg_gen_lookup_and_goto_ptr(cpu_pc);
             s->is_jmp = DISAS_TB_JUMP;
         }
     }
-}
-
-static void disas_set_insn_syndrome(DisasContext *s, uint32_t syn)
-{
-    /* We don't need to save all of the syndrome so we mask and shift
-     * out uneeded bits to help the sleb128 encoder do a better job.
-     */
-    syn &= ARM_INSN_START_WORD2_MASK;
-    syn >>= ARM_INSN_START_WORD2_SHIFT;
-
-    /* We check and clear insn_start_idx to catch multiple updates.  */
-    assert(s->insn_start_idx != 0);
-    tcg_set_insn_param(s->insn_start_idx, 2, syn);
-    s->insn_start_idx = 0;
 }
 
 static void unallocated_encoding(DisasContext *s)
@@ -1342,10 +1334,14 @@ static void handle_hint(DisasContext *s, uint32_t insn,
         s->is_jmp = DISAS_WFI;
         return;
     case 1: /* YIELD */
-        s->is_jmp = DISAS_YIELD;
+        if (!parallel_cpus) {
+            s->is_jmp = DISAS_YIELD;
+        }
         return;
     case 2: /* WFE */
-        s->is_jmp = DISAS_WFE;
+        if (!parallel_cpus) {
+            s->is_jmp = DISAS_WFE;
+        }
         return;
     case 4: /* SEV */
     case 5: /* SEVL */
@@ -1397,7 +1393,7 @@ static void handle_sync(DisasContext *s, uint32_t insn,
          * a self-modified code correctly and also to take
          * any pending interrupts immediately.
          */
-        s->is_jmp = DISAS_UPDATE;
+        gen_goto_tb(s, 0, s->pc);
         return;
     default:
         unallocated_encoding(s);
@@ -1426,7 +1422,9 @@ static void handle_msr_i(DisasContext *s, uint32_t insn,
         gen_helper_msr_i_pstate(cpu_env, tcg_op, tcg_imm);
         tcg_temp_free_i32(tcg_imm);
         tcg_temp_free_i32(tcg_op);
-        s->is_jmp = DISAS_UPDATE;
+        /* For DAIFClear, exit the cpu loop to re-evaluate pending IRQs.  */
+        gen_a64_set_pc_im(s->pc);
+        s->is_jmp = (op == 0x1f ? DISAS_EXIT : DISAS_JUMP);
         break;
     }
     default:
@@ -1790,7 +1788,8 @@ static void disas_uncond_b_reg(DisasContext *s, uint32_t insn)
             return;
         }
         gen_helper_exception_return(cpu_env);
-        s->is_jmp = DISAS_JUMP;
+        /* Must exit loop to check un-masked IRQs */
+        s->is_jmp = DISAS_EXIT;
         return;
     case 5: /* DRPS */
         if (rn != 0x1f) {
@@ -4044,26 +4043,15 @@ static void handle_rev16(DisasContext *s, unsigned int sf,
     TCGv_i64 tcg_rd = cpu_reg(s, rd);
     TCGv_i64 tcg_tmp = tcg_temp_new_i64();
     TCGv_i64 tcg_rn = read_cpu_reg(s, rn, sf);
+    TCGv_i64 mask = tcg_const_i64(sf ? 0x00ff00ff00ff00ffull : 0x00ff00ff);
 
-    tcg_gen_andi_i64(tcg_tmp, tcg_rn, 0xffff);
-    tcg_gen_bswap16_i64(tcg_rd, tcg_tmp);
+    tcg_gen_shri_i64(tcg_tmp, tcg_rn, 8);
+    tcg_gen_and_i64(tcg_rd, tcg_rn, mask);
+    tcg_gen_and_i64(tcg_tmp, tcg_tmp, mask);
+    tcg_gen_shli_i64(tcg_rd, tcg_rd, 8);
+    tcg_gen_or_i64(tcg_rd, tcg_rd, tcg_tmp);
 
-    tcg_gen_shri_i64(tcg_tmp, tcg_rn, 16);
-    tcg_gen_andi_i64(tcg_tmp, tcg_tmp, 0xffff);
-    tcg_gen_bswap16_i64(tcg_tmp, tcg_tmp);
-    tcg_gen_deposit_i64(tcg_rd, tcg_rd, tcg_tmp, 16, 16);
-
-    if (sf) {
-        tcg_gen_shri_i64(tcg_tmp, tcg_rn, 32);
-        tcg_gen_andi_i64(tcg_tmp, tcg_tmp, 0xffff);
-        tcg_gen_bswap16_i64(tcg_tmp, tcg_tmp);
-        tcg_gen_deposit_i64(tcg_rd, tcg_rd, tcg_tmp, 32, 16);
-
-        tcg_gen_shri_i64(tcg_tmp, tcg_rn, 48);
-        tcg_gen_bswap16_i64(tcg_tmp, tcg_tmp);
-        tcg_gen_deposit_i64(tcg_rd, tcg_rd, tcg_tmp, 48, 16);
-    }
-
+    tcg_temp_free_i64(mask);
     tcg_temp_free_i64(tcg_tmp);
 }
 
@@ -10943,6 +10931,10 @@ static void disas_crypto_aes(DisasContext *s, uint32_t insn)
         return;
     }
 
+    if (!fp_access_check(s)) {
+        return;
+    }
+
     /* Note that we convert the Vx register indexes into the
      * index within the vfp.regs[] array, so we can share the
      * helper with the AArch32 instructions.
@@ -11007,6 +10999,10 @@ static void disas_crypto_three_reg_sha(DisasContext *s, uint32_t insn)
         return;
     }
 
+    if (!fp_access_check(s)) {
+        return;
+    }
+
     tcg_rd_regno = tcg_const_i32(rd << 1);
     tcg_rn_regno = tcg_const_i32(rn << 1);
     tcg_rm_regno = tcg_const_i32(rm << 1);
@@ -11067,6 +11063,10 @@ static void disas_crypto_two_reg_sha(DisasContext *s, uint32_t insn)
 
     if (!arm_dc_feature(s, feature)) {
         unallocated_encoding(s);
+        return;
+    }
+
+    if (!fp_access_check(s)) {
         return;
     }
 
@@ -11180,10 +11180,10 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
     free_tmp_a64(s);
 }
 
-void gen_intermediate_code_a64(ARMCPU *cpu, TranslationBlock *tb)
+void gen_intermediate_code_a64(CPUState *cs, TranslationBlock *tb)
 {
-    CPUState *cs = CPU(cpu);
-    CPUARMState *env = &cpu->env;
+    CPUARMState *env = cs->env_ptr;
+    ARMCPU *cpu = arm_env_get_cpu(env);
     DisasContext dc1, *dc = &dc1;
     target_ulong pc_start;
     target_ulong next_page_start;
@@ -11210,7 +11210,7 @@ void gen_intermediate_code_a64(ARMCPU *cpu, TranslationBlock *tb)
     dc->be_data = ARM_TBFLAG_BE_DATA(tb->flags) ? MO_BE : MO_LE;
     dc->condexec_mask = 0;
     dc->condexec_cond = 0;
-    dc->mmu_idx = ARM_TBFLAG_MMUIDX(tb->flags);
+    dc->mmu_idx = core_to_arm_mmu_idx(env, ARM_TBFLAG_MMUIDX(tb->flags));
     dc->tbi0 = ARM_TBFLAG_TBI0(tb->flags);
     dc->tbi1 = ARM_TBFLAG_TBI1(tb->flags);
     dc->current_el = arm_mmu_idx_to_el(dc->mmu_idx);
@@ -11354,13 +11354,8 @@ void gen_intermediate_code_a64(ARMCPU *cpu, TranslationBlock *tb)
         case DISAS_NEXT:
             gen_goto_tb(dc, 1, dc->pc);
             break;
-        default:
-        case DISAS_UPDATE:
-            gen_a64_set_pc_im(dc->pc);
-            /* fall through */
         case DISAS_JUMP:
-            /* indicate that the hash table must be used to find the next TB */
-            tcg_gen_exit_tb(0);
+            tcg_gen_lookup_and_goto_ptr(cpu_pc);
             break;
         case DISAS_TB_JUMP:
         case DISAS_EXC:
@@ -11383,6 +11378,13 @@ void gen_intermediate_code_a64(ARMCPU *cpu, TranslationBlock *tb)
             /* The helper doesn't necessarily throw an exception, but we
              * must go back to the main loop to check for interrupts anyway.
              */
+            tcg_gen_exit_tb(0);
+            break;
+        case DISAS_UPDATE:
+            gen_a64_set_pc_im(dc->pc);
+            /* fall through */
+        case DISAS_EXIT:
+        default:
             tcg_gen_exit_tb(0);
             break;
         }

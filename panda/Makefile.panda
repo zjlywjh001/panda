@@ -4,5 +4,8 @@
 block-obj-y += panda/src/rr/rr_log_stubs.o
 panda/src/rr/rr_log_stubs.o: | panda/src/rr
 
+util-obj-y += panda/src/rr/rr_log_all.o
+panda/src/rr/rr_log_all.o: | panda/src/rr
+
 panda/src/rr:
 	@mkdir -p $@

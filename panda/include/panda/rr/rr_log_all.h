@@ -33,9 +33,11 @@
 
 #include <stdint.h>
 #include <assert.h>
+#include <stdio.h>
 
+#include "qemu/osdep.h"
 #include "qemu/log.h"
-#include "qom/cpu.h"
+#include "qemu/typedefs.h"
 
 // Used later for enum to string macros
 #define GENERATE_ENUM(ENUM) ENUM
@@ -45,7 +47,7 @@ typedef enum { RR_OFF, RR_RECORD, RR_REPLAY } RR_mode;
 
 typedef enum { RR_MEM_IO, RR_MEM_RAM, RR_MEM_UNKNOWN} RR_mem_type;
 
-extern volatile RR_mode rr_mode;
+extern RR_mode rr_mode;
 
 // Log management
 void rr_create_record_log(const char* filename);
@@ -54,10 +56,10 @@ void rr_destroy_log(void);
 uint8_t rr_replay_finished(void);
 
 // mz Flags set by monitor to indicate requested record/replay action
-extern volatile int rr_replay_requested;
-extern volatile int rr_record_requested;
-extern volatile int rr_end_record_requested;
-extern volatile int rr_end_replay_requested;
+extern bool rr_replay_requested;
+extern int rr_record_requested;
+extern bool rr_end_record_requested;
+extern bool rr_end_replay_requested;
 extern char* rr_requested_name;
 extern char* rr_snapshot_name;
 
@@ -88,12 +90,12 @@ typedef struct RR_prog_point_t {
 
 // mz location of a call initiated by hardware emulation during record
 // mz see RR_DO_RECORD_OR_REPLAY() macro
-extern volatile sig_atomic_t rr_skipped_callsite_location;
+extern bool rr_skipped_callsite_location;
 // mz flag to manage nested recording attempts
 // mz see RR_DO_RECORD_OR_REPLAY() macro
-extern volatile sig_atomic_t rr_record_in_progress;
+extern bool rr_record_in_progress;
 // should be true iff we are executing device code
-extern volatile sig_atomic_t rr_record_in_main_loop_wait;
+extern bool rr_record_in_main_loop_wait;
 
 // mz Routine that handles the situation when program points disagree during
 // mz replay. Typically, this means a fatal error - the routine prints some
@@ -220,7 +222,7 @@ void rr_record_input_4(RR_callsite_id call_site, uint32_t data);
 void rr_record_input_8(RR_callsite_id call_site, uint64_t data);
 
 void rr_record_interrupt_request(RR_callsite_id call_site,
-                                 int interrupt_request);
+                                 uint32_t interrupt_request);
 void rr_record_exit_request(RR_callsite_id call_site, uint32_t exit_request);
 
 void rr_record_pending_interrupts(RR_callsite_id call_site, uint32_t pending_interrupt);
@@ -234,7 +236,7 @@ void rr_replay_input_4(RR_callsite_id call_site, uint32_t* data);
 void rr_replay_input_8(RR_callsite_id call_site, uint64_t* data);
 
 void rr_replay_interrupt_request(RR_callsite_id call_site,
-                                 int* interrupt_request);
+                                 uint32_t* interrupt_request);
 bool rr_replay_pending_interrupts(RR_callsite_id call_site, uint32_t* pending_interrupt);
 bool rr_replay_exception_index(RR_callsite_id call_site, int32_t* exception_index);
 void rr_replay_exit_request(RR_callsite_id call_site, uint32_t* exit_request);
@@ -297,7 +299,7 @@ static inline bool rr_on(void) { return !rr_off(); }
             (RR_callsite_id)rr_skipped_callsite_location, val);         \
     }
 
-RR_CONVENIENCE(interrupt_request, int);
+RR_CONVENIENCE(interrupt_request, uint32_t);
 RR_CONVENIENCE(exit_request, uint32_t);
 RR_CONVENIENCE(pending_interrupts, uint32_t);
 RR_CONVENIENCE(exception_index, int32_t);

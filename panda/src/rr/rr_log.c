@@ -45,18 +45,19 @@
 #include "qmp-commands.h"
 #include "hmp.h"
 #include "panda/rr/rr_log.h"
+#include "exec/address-spaces.h"
+#include "exec/exec-all.h"
 #include "migration/migration.h"
-#include "include/exec/address-spaces.h"
-#include "include/exec/exec-all.h"
 #include "migration/qemu-file.h"
+#include "migration/qemu-file-channel.h"
+#include "migration/savevm.h"
+#include "migration/snapshot.h"
+#include "migration/global_state.h"
 #include "io/channel-file.h"
-#include "sysemu/sysemu.h"
+#include "sysemu/cpus.h"
 /******************************************************************************************/
 /* GLOBALS */
 /******************************************************************************************/
-// mz record/replay mode
-volatile RR_mode rr_mode = RR_OFF;
-
 // mz FIFO queue of log entries read from the log file
 // Implemented as ring buffer.
 #define RR_QUEUE_MAX_LEN 65536
@@ -64,13 +65,6 @@ static RR_log_entry rr_queue[RR_QUEUE_MAX_LEN];
 RR_log_entry* rr_queue_head;
 RR_log_entry* rr_queue_tail;
 RR_log_entry* rr_queue_end; // end of buffer.
-
-// mz 11.06.2009 Flags to manage nested recording
-volatile sig_atomic_t rr_record_in_progress = 0;
-volatile sig_atomic_t rr_record_in_main_loop_wait = 0;
-volatile sig_atomic_t rr_skipped_callsite_location = 0;
-// mz the log of non-deterministic events
-RR_log* rr_nondet_log = NULL;
 
 #define RR_RECORD_FROM_REQUEST 2
 #define RR_RECORD_REQUEST 1
@@ -97,16 +91,6 @@ static inline uint8_t rr_log_is_empty(void) {
 
 RR_debug_level_type rr_debug_level = RR_DEBUG_NOISY;
 
-// mz Flags set by monitor to indicate requested record/replay action
-volatile sig_atomic_t rr_record_requested = 0;
-volatile sig_atomic_t rr_replay_requested = 0;
-volatile sig_atomic_t rr_end_record_requested = 0;
-volatile sig_atomic_t rr_end_replay_requested = 0;
-char* rr_requested_name = NULL;
-char* rr_snapshot_name = NULL;
-
-unsigned rr_next_progress = 1;
-
 //
 // mz Other useful things
 //
@@ -114,8 +98,6 @@ unsigned rr_next_progress = 1;
 /******************************************************************************************/
 /* UTILITIES */
 /******************************************************************************************/
-
-RR_log_entry* rr_get_queue_head(void) { return rr_queue_head; }
 
 // Check if replay is really finished. Conditions:
 // 1) The log is empty
@@ -192,6 +174,8 @@ static void rr_spit_log_entry(RR_log_entry item)
         break;
     }
 }
+
+RR_log_entry* rr_get_queue_head(void) { return rr_queue_head; }
 
 void rr_spit_queue_head(void) { rr_spit_log_entry(*rr_queue_head); }
 
@@ -396,9 +380,9 @@ void rr_record_input_8(RR_callsite_id call_site, uint64_t data) {
  * cpu->interrupt_request without having to record the value every time it is
  * checked
  */
-int panda_current_interrupt_request = 0;
+uint32_t panda_current_interrupt_request = 0;
 void rr_record_interrupt_request(RR_callsite_id call_site,
-                                 int interrupt_request)
+                                 uint32_t interrupt_request)
 {
     if (panda_current_interrupt_request != interrupt_request) {
         rr_write_item((RR_log_entry) {
@@ -828,7 +812,7 @@ void rr_replay_input_8(RR_callsite_id call_site, uint64_t* data) {
  * and use it to return the correct value for cpu->interrupt_requested
  */
 void rr_replay_interrupt_request(RR_callsite_id call_site,
-                                 int* interrupt_request)
+                                 uint32_t* interrupt_request)
 {
     RR_log_entry* current_item =
         get_next_entry_checked(RR_INTERRUPT_REQUEST, call_site, true);
@@ -1238,7 +1222,8 @@ int rr_do_begin_record(const char* file_name_full, CPUState* cpu_state)
 
     if (rr_record_requested == RR_RECORD_FROM_REQUEST) {
         printf("loading snapshot:\t%s\n", rr_snapshot_name);
-        snapshot_ret = load_vmstate(rr_snapshot_name);
+        Error *errp;
+        snapshot_ret = load_snapshot(rr_snapshot_name, &errp);
         g_free(rr_snapshot_name);
         rr_snapshot_name = NULL;
     }
@@ -1337,11 +1322,9 @@ int rr_do_begin_replay(const char* file_name_full, CPUState* cpu_state)
     }
     QEMUFile* snp = qemu_fopen_channel_input(QIO_CHANNEL(ioc));
 
-    qemu_system_reset(VMRESET_SILENT);
-    migration_incoming_state_new(snp);
+    qemu_system_reset(SHUTDOWN_CAUSE_HOST_ERROR);
     snapshot_ret = qemu_loadvm_state(snp);
     qemu_fclose(snp);
-    migration_incoming_state_destroy();
 
     if (snapshot_ret < 0) {
         fprintf(stderr, "Failed to load vmstate\n");
@@ -1429,29 +1412,9 @@ void rr_do_end_replay(int is_error)
         panda_cleanup();
         abort();
     } else {
-        qemu_system_shutdown_request();
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_ERROR);
     }
 #endif // CONFIG_SOFTMMU
-}
-
-// Record skipped calls.
-void rr_begin_main_loop_wait(void) {
-#ifdef CONFIG_SOFTMMU
-    if (rr_in_record()) {
-        rr_record_in_main_loop_wait = 1;
-        rr_skipped_callsite_location = RR_CALLSITE_MAIN_LOOP_WAIT;
-    }
-#endif
-}
-
-void rr_end_main_loop_wait(void) {
-#ifdef CONFIG_SOFTMMU
-    if (rr_in_record()) {
-        rr_record_in_main_loop_wait = 0;
-        // Check if DMA-mapped regions have changed
-        rr_tracked_mem_regions_record();
-    }
-#endif
 }
 
 #ifdef CONFIG_SOFTMMU

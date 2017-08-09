@@ -802,14 +802,15 @@ static uint32_t get_elf_hwcap2(void)
 #define ARCH_DLINFO                                     \
     do {                                                \
         PowerPCCPU *cpu = POWERPC_CPU(thread_cpu);              \
-        NEW_AUX_ENT(AT_DCACHEBSIZE, cpu->env.dcache_line_size); \
-        NEW_AUX_ENT(AT_ICACHEBSIZE, cpu->env.icache_line_size); \
-        NEW_AUX_ENT(AT_UCACHEBSIZE, 0);                 \
         /*                                              \
-         * Now handle glibc compatibility.              \
+         * Handle glibc compatibility: these magic entries must \
+         * be at the lowest addresses in the final auxv.        \
          */                                             \
         NEW_AUX_ENT(AT_IGNOREPPC, AT_IGNOREPPC);        \
         NEW_AUX_ENT(AT_IGNOREPPC, AT_IGNOREPPC);        \
+        NEW_AUX_ENT(AT_DCACHEBSIZE, cpu->env.dcache_line_size); \
+        NEW_AUX_ENT(AT_ICACHEBSIZE, cpu->env.icache_line_size); \
+        NEW_AUX_ENT(AT_UCACHEBSIZE, 0);                 \
     } while (0)
 
 static inline void init_thread(struct target_pt_regs *_regs, struct image_info *infop)
@@ -1052,11 +1053,10 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs,
     int i;
 
     for (i = 0; i < 32; i++) {
-        (*regs)[i] = tswapreg(env->gpr[i]);
+        (*regs)[i] = tswapreg(cpu_get_gpr(env, i));
     }
-
     (*regs)[32] = tswapreg(env->pc);
-    (*regs)[33] = tswapreg(env->sr);
+    (*regs)[33] = tswapreg(cpu_get_sr(env));
 }
 #define ELF_HWCAP 0
 #define ELF_PLATFORM NULL
@@ -1099,7 +1099,7 @@ static inline void elf_core_copy_regs(target_elf_gregset_t *regs,
     int i;
 
     for (i = 0; i < 16; i++) {
-        (*regs[i]) = tswapreg(env->gregs[i]);
+        (*regs)[i] = tswapreg(env->gregs[i]);
     }
 
     (*regs)[TARGET_REG_PC] = tswapreg(env->pc);
@@ -1761,6 +1761,13 @@ static abi_ulong create_elf_tables(abi_ulong p, int argc, int envc,
     } while(0)
 
     /* There must be exactly DLINFO_ITEMS entries here.  */
+#ifdef ARCH_DLINFO
+    /*
+     * ARCH_DLINFO must come first so platform specific code can enforce
+     * special alignment requirements on the AUXV if necessary (eg. PPC).
+     */
+    ARCH_DLINFO;
+#endif
     NEW_AUX_ENT(AT_PHDR, (abi_ulong)(info->load_addr + exec->e_phoff));
     NEW_AUX_ENT(AT_PHENT, (abi_ulong)(sizeof (struct elf_phdr)));
     NEW_AUX_ENT(AT_PHNUM, (abi_ulong)(exec->e_phnum));
@@ -1783,13 +1790,6 @@ static abi_ulong create_elf_tables(abi_ulong p, int argc, int envc,
     if (u_platform) {
         NEW_AUX_ENT(AT_PLATFORM, u_platform);
     }
-#ifdef ARCH_DLINFO
-    /*
-     * ARCH_DLINFO must come last so platform specific code can enforce
-     * special alignment requirements on the AUXV if necessary (eg. PPC).
-     */
-    ARCH_DLINFO;
-#endif
     NEW_AUX_ENT (AT_NULL, 0);
 #undef NEW_AUX_ENT
 
@@ -2263,6 +2263,7 @@ static int symcmp(const void *s0, const void *s1)
 static void load_symbols(struct elfhdr *hdr, int fd, abi_ulong load_bias)
 {
     int i, shnum, nsyms, sym_idx = 0, str_idx = 0;
+    uint64_t segsz;
     struct elf_shdr *shdr;
     char *strings = NULL;
     struct syminfo *s = NULL;
@@ -2294,19 +2295,26 @@ static void load_symbols(struct elfhdr *hdr, int fd, abi_ulong load_bias)
         goto give_up;
     }
 
-    i = shdr[str_idx].sh_size;
-    s->disas_strtab = strings = g_try_malloc(i);
-    if (!strings || pread(fd, strings, i, shdr[str_idx].sh_offset) != i) {
+    segsz = shdr[str_idx].sh_size;
+    s->disas_strtab = strings = g_try_malloc(segsz);
+    if (!strings ||
+        pread(fd, strings, segsz, shdr[str_idx].sh_offset) != segsz) {
         goto give_up;
     }
 
-    i = shdr[sym_idx].sh_size;
-    syms = g_try_malloc(i);
-    if (!syms || pread(fd, syms, i, shdr[sym_idx].sh_offset) != i) {
+    segsz = shdr[sym_idx].sh_size;
+    syms = g_try_malloc(segsz);
+    if (!syms || pread(fd, syms, segsz, shdr[sym_idx].sh_offset) != segsz) {
         goto give_up;
     }
 
-    nsyms = i / sizeof(struct elf_sym);
+    if (segsz / sizeof(struct elf_sym) > INT_MAX) {
+        /* Implausibly large symbol table: give up rather than ploughing
+         * on with the number of symbols calculation overflowing
+         */
+        goto give_up;
+    }
+    nsyms = segsz / sizeof(struct elf_sym);
     for (i = 0; i < nsyms; ) {
         bswap_sym(syms + i);
         /* Throw away entries which we do not need.  */

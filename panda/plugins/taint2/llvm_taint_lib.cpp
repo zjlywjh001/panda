@@ -842,8 +842,8 @@ bool PandaTaintVisitor::getAddr(Value *addrVal, Addr& addrOut) {
 
     int64_t archStateOffset = (uintptr_t)first_cpu->env_ptr
         - (uintptr_t)ENV_GET_CPU((CPUArchState*)first_cpu->env_ptr);
-    if (offset == offsetof(CPUState, tcg_exit_req) - archStateOffset) {
-        assert((uintptr_t)first_cpu->env_ptr + offset == (uintptr_t)&first_cpu->tcg_exit_req);
+    if (offset == offsetof(CPUState, icount_decr.u16.high) - archStateOffset) {
+        assert((uintptr_t)first_cpu->env_ptr + offset == (uintptr_t)&first_cpu->icount_decr.u16.high);
         addrOut.flag = IRRELEVANT;
         return true;
     }

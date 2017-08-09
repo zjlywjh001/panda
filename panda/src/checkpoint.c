@@ -12,7 +12,11 @@
 #include "io/channel-file.h"
 #include "migration/migration.h"
 #include "migration/qemu-file.h"
+#include "migration/qemu-file-channel.h"
+#include "migration/global_state.h"
+#include "migration/savevm.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/cpus.h"
 
 #include "panda/rr/rr_log.h"
 #include "panda/common.h"
@@ -122,13 +126,10 @@ void panda_restart(void *opaque) {
 
     QIOChannelFile *iochannel = qio_channel_file_new_fd(checkpoint->memfd);
     QEMUFile *file = qemu_fopen_channel_input(QIO_CHANNEL(iochannel));
-    qemu_system_reset(VMRESET_SILENT);
-    migration_incoming_state_new(file);
+    qemu_system_reset(SHUTDOWN_CAUSE_HOST_ERROR);
 
     int snapshot_ret = qemu_loadvm_state(file);
     assert(snapshot_ret >= 0);
-
-    migration_incoming_state_destroy();
 
     first_cpu->rr_guest_instr_count = checkpoint->guest_instr_count;
     first_cpu->panda_guest_pc = panda_current_pc(first_cpu);
