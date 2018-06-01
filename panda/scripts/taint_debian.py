@@ -77,7 +77,7 @@ t1 = time.time()
 
 tmpdir = os.getcwd()
 
-verbose_off()
+#verbose_off()
 
 #create recording
 
@@ -172,7 +172,7 @@ output = vcheck_output([qemu_binary(arch_data)] + panda_args)
 t4 = time.time()
 
 #print "\n-----------------------------------------------------------------------------"
-print "Replay 3: perform taint analysis"
+print "Replay 3: perform taint analysis and extract magicvalues"
 
 # second pass to do taint analysis
 taint_plog = tmpdir + "/taint.plog"
@@ -189,6 +189,7 @@ else:
     more_args =  ["-panda", "file_taint:filename=%s,pos,enable_taint_on_open" % fileinput, \
                   "-panda", "tainted_branch", \
                   "-panda", "edges",
+                  "-panda", "magicvalues",
                   "-panda", "tainted_ldst"\
     ]
     panda_args.extend(more_args)

@@ -32,8 +32,8 @@ def out_args():
 
 def vcheck_output(cmd_arr):
     if verbose():
-        return sp.check_output(cmd_arr)
-    return sp.check_output(cmd_arr, stderr=(open(os.devnull, 'wb')))
+        print(sp.check_output(cmd_arr))
+    sp.check_output(cmd_arr, stderr=(open(os.devnull, 'wb')))
 
 def vcheck_call(cmd_arr):
     if verbose():
