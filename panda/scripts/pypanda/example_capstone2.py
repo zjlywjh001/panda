@@ -13,6 +13,13 @@ md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
 insn_cache = {} # address -> disassembly string
 executed_pcs = [] # List of addresses we executed
 
+
+@panda.cb_after_machine_init(name="init")
+def machinit(env):
+        progress("Machine initialized -- disabling chaining & reverting to booted snapshot\n")
+        panda.disable_tb_chaining()
+
+
 # Run a command in the guest
 @blocking
 def my_runcmd():
@@ -25,7 +32,6 @@ def my_runcmd():
 def generate_insns(env, tb):
     # Disassemble each basic block and store in insn_cache
     if tb.pc in insn_cache: return
-
     code_buf = ffi.new("char[]", tb.size)
     panda.virtual_memory_read(env, tb.pc, code_buf, tb.size)
     code = ffi.unpack(code_buf, tb.size)
@@ -34,15 +40,30 @@ def generate_insns(env, tb):
     for i in md.disasm(code, tb.pc):
         insn_cache[tb.pc] += ("0x%x:\t%s\t%s\n" %(i.address, i.mnemonic, i.op_str))
 
-@panda.cb_after_block_exec(name="after_exec", procname="toy")
-def after_block_exec(env, tb):
+
+@panda.cb_after_block_translate(name="after", procname="toy")
+def after_block_trans(env, tb):
     # Before we translate each block in find cache its disassembly
+    # toy is 0x8048154 to 0x804a034
+    if tb.pc >= 0x8050000: return 0
     generate_insns(env, tb)
     return 0
+
+
+@panda.cb_before_block_exec(name="exec", procname="toy")
+def before_block_exec(env, tb):
+    # At each BB's execution in 'find', ensure translation is cached and add to executed_pcs
+    pc = panda.current_pc(env)
+    if pc >= 0x8050000: return 0
+    if pc not in insn_cache: # If we miss the cache, update it
+        generate_insns(env, tb)
+    executed_pcs.append(pc)
+    return 0
+
 
 panda.queue_async(my_runcmd)
 panda.run()
 
+progress ("%d basic blocks in 'toy'" % (len(insn_cache)))
 
-progress ("%d pcs in executed_pcs" % (len(executed_pcs)))
 for pc in executed_pcs: print(insn_cache[pc])
