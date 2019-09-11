@@ -66,7 +66,7 @@ bool panda_tb_chaining = true;
 bool panda_help_wanted = false;
 bool panda_plugin_load_failed = false;
 bool panda_abort_requested = false;
-extern bool panda_python_mode;
+extern bool panda_library_mode;
 
 bool panda_add_arg(const char *plugin_name, const char *plugin_arg) {
     if (plugin_name == NULL)    // PANDA argument
@@ -127,7 +127,7 @@ bool panda_load_external_plugin(const char *filename, const char *plugin_name, v
 }
 
 
-bool panda_load_plugin(const char *filename, const char *plugin_name) {
+bool panda_load_plugin(const char *filename, const char *plugin_name, bool library_mode) {
     // don't load the same plugin twice
     uint32_t i;
     for (i=0; i<nb_panda_plugins_loaded; i++) {
@@ -142,8 +142,7 @@ bool panda_load_plugin(const char *filename, const char *plugin_name) {
     nb_panda_plugins_loaded ++;
 
     // Ensure pypanda is loaded so its symbols can be used in the plugin we're loading (TODO: should we move this to happen earlier (and just once?))
-
-    if (panda_python_mode) {
+    if (library_mode) {
       // When running as a library, load libpanda
       void *libpanda = dlopen("../../build/"
 #if defined(TARGET_I386)
@@ -235,7 +234,24 @@ void panda_require(const char *plugin_name) {
     char *plugin_path = panda_plugin_path(plugin_name);
 
     // load plugin same as in vl.c
-    if (!panda_load_plugin(plugin_path, plugin_name)) {
+    if (!panda_load_plugin(plugin_path, plugin_name, false)) {
+        fprintf(stderr, PANDA_MSG_FMT "FAILED to load required plugin %s from %s\n", PANDA_CORE_NAME, plugin_name, plugin_path);
+        abort();
+    }
+    g_free(plugin_path);
+}
+
+void panda_require_from_library(const char *plugin_name) {
+    // If we're printing help, panda_require will be a no-op.
+    if (panda_help_wanted) return;
+
+    fprintf(stderr, PANDA_MSG_FMT "loading required plugin %s\n", PANDA_CORE_NAME, plugin_name);
+
+    // translate plugin name into a path to .so
+    char *plugin_path = panda_plugin_path(plugin_name);
+
+    // load plugin same as in vl.c
+    if (!panda_load_plugin(plugin_path, plugin_name, true)) {
         fprintf(stderr, PANDA_MSG_FMT "FAILED to load required plugin %s from %s\n", PANDA_CORE_NAME, plugin_name, plugin_path);
         abort();
     }
@@ -990,7 +1006,7 @@ void qmp_load_plugin(bool has_file_name, const char *file_name, const char *plug
         g_free(args);
     }
 
-    if(!panda_load_plugin(file_name, plugin_name)) {
+    if(!panda_load_plugin(file_name, plugin_name, false)) {
         // TODO: do something with errp here?
     }
 

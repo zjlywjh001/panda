@@ -748,9 +748,10 @@ extern panda_cb_list *panda_cbs[PANDA_CB_LAST];
 // plugin mgmt
 bool panda_load_external_plugin(const char *filename, const char *plugin_name, 
                                 void *plugin_uuid, void *init_fn_ptr);
-bool panda_load_plugin(const char *filename, const char *plugin_name);
+bool panda_load_plugin(const char *filename, const char *plugin_name, bool library_mode);
 char *panda_plugin_path(const char *name);
 void panda_require(const char *plugin_name);
+void panda_require_from_library(const char *plugin_name);
 void panda_do_unload_plugin(int index);
 void panda_unload_plugin(void* plugin);
 void panda_unload_plugin_idx(int idx);
@@ -866,7 +867,7 @@ void panda_memsavep(FILE *f);
 // from panda_api.c
 int panda_init(int argc, char **argv, char **envp);
 int panda_run(void);
-void panda_set_python_mode(void);
+void panda_set_library_mode(bool);
 void panda_stop(int code);
 void panda_cont(void);
 void panda_start_pandalog(const char *name);

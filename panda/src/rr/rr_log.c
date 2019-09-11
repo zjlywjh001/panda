@@ -58,7 +58,7 @@
 /******************************************************************************************/
 // mz record/replay mode
 volatile RR_mode rr_mode = RR_OFF;
-extern bool panda_python_mode;
+extern bool panda_library_mode;
 
 // mz FIFO queue of log entries read from the log file
 // Implemented as ring buffer.
@@ -1602,7 +1602,7 @@ void rr_do_end_replay(int is_error)
     if (is_error) {
         abort();
     } else {
-      if (panda_python_mode) { // XXX: This may be unnecessary, shutdown seems to work just fine?
+      if (panda_library_mode) { // XXX: This may be unnecessary, shutdown seems to work just fine?
           // Reset the system and break out of the vl.c loop. Note we leave the cpu thread running
           qemu_system_reset(VMRESET_SILENT);
           panda_break_vl_loop_req = true;

@@ -35,7 +35,7 @@ extern int panda_in_main_loop;
 extern bool panda_stopped;
 
 extern char *panda_snap_name;
-extern bool panda_python_mode;
+extern bool panda_library_mode;
 
 int panda_run(void) {
     qemu_cpu_kick(first_cpu);
@@ -45,8 +45,8 @@ int panda_run(void) {
     return 0;
 }
 
-void panda_set_python_mode(void) {
-  panda_python_mode = true;
+void panda_set_library_mode(bool value) {
+  panda_library_mode = value;
 };
 
 extern const char *qemu_file;

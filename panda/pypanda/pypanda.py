@@ -248,61 +248,11 @@ class Panda:
                 self.handle = ffi.cast('void *', 0xdeadbeef)
                 self._initialized_panda = False
 
-                """
-                @pcb.asid_changed
-                def __asid_changed(cpustate, old_asid, new_asid):
-                    if old_asid == new_asid:
-                        return 0
-                    current = self.get_current_process(cpustate)
-                    if current == ffi.NULL:
-                        return 0
-                    current_name = ffi.string(current.name).decode('utf8', 'ignore')
-                    for cb_name, cb in self.registered_callbacks.items():
-                        if not cb["procname"]:
-                            continue
-                        if current_name == cb["procname"] and not cb['enabled']:
-                            self.enable_callback_by_name(cb_name)
-                        if current_name != cb["procname"] and cb['enabled']:
-                            self.disable_callback_by_name(cb_name)
-
-                    for h in self.hook_list:
-                        if not h.is_kernel and ffi.NULL != current:
-                            if h.program_name:
-                                if h.program_name == curent_name and not h.is_enabled:
-                                    self.enable_hook(h)
-                                elif hook.program_name != current_name and hook.is_enabled:
-                                    self.disable_hook(h)
-                            libs = self.get_libraries(cpustate,current)
-                            if h.library_name:
-                                lowest_matching_lib = None
-                                if libs == ffi.NULL: continue
-                                for i in range(libs.num):
-                                    lib = libs.module[i]
-                                    if lib.file != ffi.NULL: 
-                                        filename = ffi.string(lib.file).decode()
-                                        if h.library_name in filename:
-                                            if lowest_matching_lib:
-                                                lowest_matching_lib = lib if lib.base < lowest_matching_lib.base else lowest_matching_lib
-                                            else:
-                                                lowest_matching_lib = lib
-                                if lowest_matching_lib:
-                                    self.update_hook(h, lowest_matching_lib.base + h.target_library_offset)
-                                else:
-                                    self.disable_hook(h)
-
-                    return 0
-                @pcb.init
-                def __panda_loaded(newhandle): # Local function with a reference to this instance's self.handle
-                        self.handle = newhandle
-                        self.register_callback(self.handle, self.callback.asid_changed, __asid_changed)
-                        return True
-
-                # Register init which sets up asid_changed as well
-                self.load_python_plugin(__panda_loaded, "__internal_python_init")
-                """
+                # Register asid_changed CB if and only if a callback requires procname
+                self._registered_asid_changed_internal_cb = False
 
         def _initialize_panda(self):
-                self.libpanda.panda_set_python_mode()
+                self.libpanda.panda_set_library_mode(True)
                 self.libpanda.panda_init(self.len_cargs, self.panda_args_ffi, self.cenvp)
 
                 # Connect to serial socket and setup serial_console if necessary
@@ -544,11 +494,67 @@ class Panda:
                 uid_ffi = ffi.cast("void*",randint(0,0xffffffff)) # XXX: Unlikely but possible for collisions here
                 self.libpanda.panda_load_external_plugin(filename_ffi, name_ffi, uid_ffi, init_ffi)
 
+        def _register_internal_asid_changed_cb(self):
+                if self._registered_asid_changed_internal_cb:
+                        return
+
+                # Local function def
+                @pcb.asid_changed
+                def __asid_changed(cpustate, old_asid, new_asid):
+                    if old_asid == new_asid:
+                        return 0
+                    current = self.get_current_process(cpustate)
+                    if current == ffi.NULL:
+                        return 0
+                    current_name = ffi.string(current.name).decode('utf8', 'ignore')
+                    for cb_name, cb in self.registered_callbacks.items():
+                        if not cb["procname"]:
+                            continue
+                        if current_name == cb["procname"] and not cb['enabled']:
+                            self.enable_callback_by_name(cb_name)
+                        if current_name != cb["procname"] and cb['enabled']:
+                            self.disable_callback_by_name(cb_name)
+
+                    for h in self.hook_list:
+                        if not h.is_kernel and ffi.NULL != current:
+                            if h.program_name:
+                                if h.program_name == curent_name and not h.is_enabled:
+                                    self.enable_hook(h)
+                                elif hook.program_name != current_name and hook.is_enabled:
+                                    self.disable_hook(h)
+                            libs = self.get_libraries(cpustate,current)
+                            if h.library_name:
+                                lowest_matching_lib = None
+                                if libs == ffi.NULL: continue
+                                for i in range(libs.num):
+                                    lib = libs.module[i]
+                                    if lib.file != ffi.NULL: 
+                                        filename = ffi.string(lib.file).decode()
+                                        if h.library_name in filename:
+                                            if lowest_matching_lib:
+                                                lowest_matching_lib = lib if lib.base < lowest_matching_lib.base else lowest_matching_lib
+                                            else:
+                                                lowest_matching_lib = lib
+                                if lowest_matching_lib:
+                                    self.update_hook(h, lowest_matching_lib.base + h.target_library_offset)
+                                else:
+                                    self.disable_hook(h)
+
+                    return 0
+
+                if debug:
+                        progress("Registering internal callback to support procname filter")
+
+                self._registered_asid_changed_internal_cb = True
+                self.register_callback(self.handle, self.callback.asid_changed, __asid_changed, "__asid_changed")
+
         def hook(self, addr, enabled=True, kernel=True, libraryname=None, procname=None):
                 '''
                 Decorate a function to setup a hook: when a guest goes to execute a basic block beginning with addr,
                 the function will be called with args (CPUState, TranslationBlock)
                 '''
+                if procname:
+                        self._register_internal_asid_changed_cb()
                 def decorator(fun):
                         assert(self.handle is not None)
 
@@ -557,7 +563,8 @@ class Panda:
 
                         if not hasattr(self, 'libpanda_hooks'):
                             # Enable hooks plugin on first request
-                            self.load_plugin("hooks")
+                            #self.load_plugin("hooks")
+                            self.require("hooks")
 
                         if debug:
                             print("Registering breakpoint at 0x{:x} -> {} == {}".format(addr, fun, 'cdata_cb'))
@@ -592,6 +599,7 @@ class Panda:
 
                 if procname:
                         enabled = False # Process won't be running at time 0 (probably)
+                        self._register_internal_asid_changed_cb()
 
                 def decorator(fun):
                         local_name = name  # We need a new varaible otherwise we have scoping issues with _generated_callback's name
@@ -683,7 +691,7 @@ class Panda:
 
         def require(self, plugin):
                 charptr = pyp.new("char[]", bytes(plugin,"utf-8"))
-                self.libpanda.panda_require(charptr)
+                self.libpanda.panda_require_from_library(charptr)
                 self.load_plugin_library(plugin)
 
         def enable_plugin(self, handle):
@@ -1065,9 +1073,8 @@ class Panda:
 
         @blocking
         def copy_to_guest(self, copy_directory, iso_name=None):
-
-                progress("Creating ISO {}...".format(iso_name))
                 if not iso_name: iso_name = copy_directory + '.iso'
+                progress("Creating ISO {}...".format(iso_name))
 
                 make_iso(copy_directory, iso_name)
 
@@ -1081,10 +1088,6 @@ class Panda:
                 #   if there is a setup.sh script in the directory,
                 #   then run that setup.sh script first (good for scripts that need to
                 #   prep guest environment before script runs)
-#                copy_directory="/mnt" # for now just mount to an existing directory
-
-                # XXX: fix this copy directory hack
-
                 setup_sh = "mkdir -p {mount_dir}; while ! mount /dev/cdrom {mount_dir}; do sleep 0.3; " \
                            " umount /dev/cdrom; done; {mount_dir}/setup.sh &> /dev/null || true " \
                            .format(mount_dir = (shlex.quote(copy_directory)))
@@ -1097,10 +1100,7 @@ class Panda:
 
                 if copy_directory: # If there's a directory, build an ISO and put it in the cddrive
                         # Make iso
-                        copy_to_guest(copy_directory, iso_name)
-
-                        # TODO XXX: guest filesystem is read only so this could hang forever if it can't mount. Instead change the command to run out of /mnt/.
-                        guest_command = guest_command.replace(copy_directory, "/mnt/")
+                        self.copy_to_guest(copy_directory, iso_name)
 
                 # 3) type commmand (note we type command, start recording, finish command)
                 self.type_serial_cmd(guest_command)
@@ -1119,4 +1119,4 @@ class Panda:
                 self.run_monitor_cmd("end_record")
 
                 print("Finished recording")
-# vim: noexpandtab:tabstop=4:
+# vim: expandtab:tabstop=8:
