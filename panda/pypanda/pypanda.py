@@ -865,6 +865,7 @@ class Panda:
             length_a = ffi.cast("int", length)
             self.libpanda.panda_virtual_memory_read_external(env, addr, buf_a, length_a)
 
+
         def virtual_memory_write(self, env, addr, buf, length):
             if not hasattr(self, "_memcb"):
                 self.enable_memcb()
@@ -887,7 +888,7 @@ class Panda:
                 self.taint_enable(cont=False)
                 if debug:
                         progress("taint_reg reg=%d label=%d" % (reg_num, label))
-                self.stop()
+                #self.stop() #  What are you doing here?
                 for i in range(self.register_size):
                         self.queue_main_loop_wait_fn(self.libpanda_taint2.taint2_label_reg, [reg_num, i, label])
                 self.queue_main_loop_wait_fn(self.libpanda.panda_cont, [])

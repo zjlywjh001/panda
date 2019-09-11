@@ -7,35 +7,56 @@ strings in the buffers.
 
 Run with: python3 example_virt_mem_read_callback.py
 '''
-from pypanda import *
+from pypanda import Panda, ffi, blocking
 from time import sleep
-from string import printable
-import unicodedata
+from sys import argv
+from string import ascii_letters
+from os import remove, path
 
 # Single arg of arch, defaults to i386
 arch = "i386" if len(argv) <= 1 else argv[1]
 panda = Panda(generic=arch)
 
-@panda.callback.init
-def init(handle):
-	progress("init in python. handle="+str(handle))
-	panda.register_callback(handle, panda.callback.virt_mem_after_write,\
-							 virt_mem_after_write)
-	return True
+# Make sure we're always saving a new recording
+recording_name = "mem_test.recording"
+for f in [recording_name+"-rr-nondet.log", recording_name+"-rr-snp"]:
+    if path.isfile(f): remove(f)
 
-@panda.callback.virt_mem_after_write
-def virt_mem_after_write(cpustate,pc, addr, size, buf):
-	z = ffi.cast("char*", buf)
-	str_build = ""
-	for i in range(size):
-		value = str(z[i].decode('utf-8','ignore'))
-		if value in printable and value != " ":
-			str_build += value
-	if len(str_build) >= 5:
-		progress("cool string: "+str(str_build))
-	return 0
+@blocking
+def my_record_cmd(): # Run a non-deterministic command at the root snapshot, then end .run()
+    panda.record_cmd("wget google.com", recording_name=recording_name)
+    panda.stop_run()
 
+
+print("Take recording...")
+panda.queue_async(my_record_cmd)
+panda.run()
+
+print("Analyze replay...")
+string_buffer = ""
+
+# After we see a virt mem write, try to build up a human-readable string. If we build
+# up a big enough string, print it
+@panda.cb_virt_mem_after_write()
+def virt_mem_after_write(env, pc, addr, size, buf):
+    global string_buffer
+    str_buf = ffi.new("char []", size)
+    panda.virtual_memory_read(env, addr, str_buf, size)
+    try:
+        py_str = ffi.unpack(str_buf, size).decode("utf-8", "strict")
+    except UnicodeDecodeError: #
+        string_buffer = ""
+        return 0
+
+    string_buffer += "".join([x for x in py_str if x in ascii_letters or x in [' ', '\n']])
+
+    if len(string_buffer) > 80:
+        print(string_buffer)
+        string_buffer = ""
+
+    if len(string_buffer) < size/2:
+        string_buffer = ""
+    return 0
 
 panda.enable_memcb()
-panda.load_python_plugin(init,"example_virt_mem_read")
-panda.run()
+panda.run_replay(recording_name)

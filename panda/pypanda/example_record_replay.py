@@ -16,11 +16,11 @@ def record_nondet(): # Run a non-deterministic command at the root snapshot, the
     panda.record_cmd("date; cat /dev/urandom | head -n30 | md5sum", recording_name=recording_name)
     panda.stop_run()
 
-# Collect BBs or validate that our replay is good
+# Collect BBs during both recording and then replay validate that our replay is good
 in_replay = False
 orig_blocks = set()
 replay_blocks = set()
-@panda.cb_before_block_exec(name="foo")
+@panda.cb_before_block_exec()
 def before_block_exec(env, tb):
     # At each BB's execution in 'find', ensure translation is cached and add to executed_pcs
     global in_replay, orig_blocks, replay_blocks
@@ -59,6 +59,7 @@ def second_cmd(): # Run a command at the root snapshot, then end .run()
     panda.revert_sync("root")
     w = panda.run_serial_cmd("whoami")
     assert("root" in w), "Second command failed"
+    print("Second command ran successfully")
     panda.stop_run()
 
 print("======= RUN AGAIN ======")

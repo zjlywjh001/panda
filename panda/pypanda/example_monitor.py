@@ -17,14 +17,14 @@ class State(Enum):
 
 state = State.CB_NOT_REQUESTED
 
-@panda.callback.after_machine_init
+@panda.cb_after_machine_init
 def machinit(env):
     progress("Machine initialized -- disabling chaining & reverting to booted snapshot\n")
     panda.disable_tb_chaining()
     panda.revert("root", now=True)
     pc = panda.current_pc(env)
 
-@panda.callback.before_block_exec
+@panda.cb_before_block_exec
 def before_block_exec(env,tb):
     global state
     pc = panda.current_pc(env)
@@ -52,18 +52,5 @@ def info_mem_cb(result):
 
     print("info mem returned information on {} allocations!\n\t Biggest: {}\n\t" \
             "Smallest: {}".format(len(lines), lines[-1], lines[0]))
-
-# this is the initialiation for this plugin
-@panda.callback.init
-def init(handle):
-    panda.register_callback(handle, panda.callback.after_machine_init, machinit)
-    panda.register_callback(handle, panda.callback.before_block_exec, before_block_exec)
-    return True
-
-panda.load_python_plugin(init, "mon")
-progress ("--- pypanda done with mon plugin init")
-
-panda.init()
-progress ("--- pypanda done with init")
 
 panda.run()
