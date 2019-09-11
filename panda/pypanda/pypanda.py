@@ -302,6 +302,7 @@ class Panda:
                 """
 
         def _initialize_panda(self):
+                self.libpanda.panda_set_python_mode()
                 self.libpanda.panda_init(self.len_cargs, self.panda_args_ffi, self.cenvp)
 
                 # Connect to serial socket and setup serial_console if necessary

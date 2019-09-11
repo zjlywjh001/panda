@@ -159,6 +159,7 @@ int panda_in_main_loop = 0;
 
 extern bool panda_abort_requested; // When set, we exit in after printing a help message
 bool panda_break_vl_loop_req = false; // When set, we break the main loop in vl.c
+bool panda_python_mode = false; // Set if using panda from python
 
 char *panda_snap_name = NULL;
 const char* replay_name = NULL;

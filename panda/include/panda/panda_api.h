@@ -31,6 +31,7 @@ void panda_memsavep(FILE *f);
 // from panda_api.c
 int panda_init(int argc, char **argv, char **envp);
 int panda_run(void);
+void panda_set_python_mode(void);
 void panda_stop(int code);
 void panda_cont(void);
 void panda_start_pandalog(const char *name);

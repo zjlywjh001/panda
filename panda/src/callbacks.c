@@ -66,6 +66,7 @@ bool panda_tb_chaining = true;
 bool panda_help_wanted = false;
 bool panda_plugin_load_failed = false;
 bool panda_abort_requested = false;
+extern bool panda_python_mode;
 
 bool panda_add_arg(const char *plugin_name, const char *plugin_arg) {
     if (plugin_name == NULL)    // PANDA argument
@@ -141,23 +142,24 @@ bool panda_load_plugin(const char *filename, const char *plugin_name) {
     nb_panda_plugins_loaded ++;
 
     // Ensure pypanda is loaded so its symbols can be used in the plugin we're loading (TODO: should we move this to happen earlier (and just once?))
-#ifdef PYPANDA
-    // When running as a library, load libpanda
-    void *libpanda = dlopen("../../build/"
-#if defined(TARGET_I386)
-        "i386-softmmu/libpanda-i386.so"
-#elif defined(TARGET_x86_64)
-        "/x86_64-softmmu-softmmu/libpanda-x86_64.so"
-#else
-        "\n TODO: other architectures \n"
-#endif
-        , RTLD_LAZY | RTLD_NOLOAD | RTLD_GLOBAL);
 
-    if (!libpanda) {
-      fprintf(stderr, "Failed to load libpanda: %s\n", dlerror());
-      return false;
-    }
+    if (panda_python_mode) {
+      // When running as a library, load libpanda
+      void *libpanda = dlopen("../../build/"
+#if defined(TARGET_I386)
+          "i386-softmmu/libpanda-i386.so"
+#elif defined(TARGET_x86_64)
+          "/x86_64-softmmu-softmmu/libpanda-x86_64.so"
+#else
+          "\n TODO: other architectures \n"
 #endif
+          , RTLD_LAZY | RTLD_NOLOAD | RTLD_GLOBAL);
+
+      if (!libpanda) {
+        fprintf(stderr, "Failed to load libpanda: %s\n", dlerror());
+        return false;
+      }
+    }
 
     void *plugin = dlopen(filename, RTLD_NOW);
     if(!plugin) {
