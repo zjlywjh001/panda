@@ -51,7 +51,7 @@ def blocking(func):
                 assert (threading.current_thread() is not threading.main_thread()), "Blocking function run in main thread"
                 return func(*args, **kwargs)
         wrapper.__blocking__ = True
-        wrapper.__name__ = func.__name__ + "(blocking)"
+        wrapper.__name__ = func.__name__ + " (with async thread)"
         return wrapper
 
 
@@ -181,7 +181,7 @@ class Panda:
                 self.register_size = int(bits / 8)
 
                 # note: weird that we need panda as 1st arg to lib fn to init?
-                self.panda_args = [self.panda, "-m", self.mem, "-display", "none", "-L", biospath, "-os", self.os_string, self.qcow, "-snapshot"] # Snapshot so we don't corrupt qcow
+                self.panda_args = [self.panda, "-m", self.mem, "-display", "none", "-L", biospath, "-os", self.os_string, self.qcow]
                 self.panda_args.extend(extra_args)
 
                 # The "athread" thread manages actions that need to occur outside qemu's CPU loop
@@ -462,7 +462,7 @@ class Panda:
                     self._initialize_panda()
                     self._initialized_panda = True
 
-                if not self.started:
+                if not self.started.is_set():
                         self.started.set()
 
                 self.running.set()

@@ -46,9 +46,9 @@ class AsyncThread:
 
             # Don't interact with guest if it isn't running
             # Wait for self.panda_started, but also abort if running becomes false
-            while not self.panda_started and self.running:
+            while not self.panda_started.is_set() and self.running:
                 try:
-                    self.panda_started.wait(True, 1)
+                    self.panda_started.wait(timeout=1.0)
                 except Empty:
                     continue
 
