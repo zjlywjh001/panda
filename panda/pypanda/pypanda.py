@@ -219,8 +219,10 @@ class Panda:
                 self.len_cargs = len_cargs
                 self.cenvp = cenvp
                 self.taint_enabled = False
-                self.pcb_list = {}
                 self.hook_list = []
+
+                self.current_asid_name = None
+                self.asid_mapping = {}
 
                 # Setup callbacks and generate self.cb_XYZ functions for cb decorators
                 # XXX Don't add any other methods with names starting with 'cb_'
@@ -247,6 +249,7 @@ class Panda:
                 #self.handle = None
                 self.handle = ffi.cast('void *', 0xdeadbeef)
                 self._initialized_panda = False
+                self.disabled_tb_chaining = False
 
                 # Register asid_changed CB if and only if a callback requires procname
                 self._registered_asid_changed_internal_cb = False
@@ -267,7 +270,7 @@ class Panda:
                         self.monitor_console = Expect(self.monitor_socket, expectation=self.monitor_prompt, quiet=True,
                                                                                 consume_first=True)
                 # Register main_loop_wait_callback
-                self.register_callback(self.handle, self.callback.main_loop_wait, main_loop_wait_cb, 'main_loop_wait')
+                self.register_callback(self.callback.main_loop_wait, main_loop_wait_cb, 'main_loop_wait') # XXX WIP
                 # Register callback to cleanup when qemu shuts down
                 #self.register_callback(self.handle, self.callback.pre_shutdown, pre_shutdown_cb)
         # /__init__
@@ -342,6 +345,8 @@ class Panda:
                 From a blocking thread, request vl.c loop to break. Returns control flow in main thread.
                 In other words, once this is called, panda.run() will finish and your main thread will continue.
                 If you also want to unload plugins, use end_analysis instead
+
+                XXX: This doesn't work in replay mode
                 '''
                 self.libpanda.panda_break_vl_loop_req = True
 
@@ -400,10 +405,11 @@ class Panda:
                 self.libpanda.panda_enable_tb_chaining()
 
         def disable_tb_chaining(self):
-                if debug:
-                        progress("Disabling TB chaining")
-#               print("!@!@!!!!!! Disabling TB chaining\n")
-                self.libpanda.panda_disable_tb_chaining()
+                if not self.disabled_tb_chaining:
+                    self.disabled_tb_chaining = True
+                    if debug:
+                            progress("Disabling TB chaining")
+                    self.libpanda.panda_disable_tb_chaining()
 
         def run(self):
                 if debug:
@@ -494,59 +500,105 @@ class Panda:
                 uid_ffi = ffi.cast("void*",randint(0,0xffffffff)) # XXX: Unlikely but possible for collisions here
                 self.libpanda.panda_load_external_plugin(filename_ffi, name_ffi, uid_ffi, init_ffi)
 
+
+        def get_process_name(self, cpu):
+            current = self.get_current_process(cpu)
+            if current == ffi.NULL:
+                return 0
+
+            current_name = ffi.string(current.name).decode('utf8', 'ignore')
+
+            return current_name
+
+
+        def procname_changed(self, name):
+            print(f"Changed to process {name}")
+
+            for cb_name, cb in self.registered_callbacks.items():
+                if not cb["procname"]:
+                    continue
+                if name == cb["procname"] and not cb['enabled']:
+                    self.enable_callback(cb_name)
+                if name != cb["procname"] and cb['enabled']:
+                    self.disable_callback(cb_name)
+
+            for h in self.hook_list:
+                if not h.is_kernel and ffi.NULL != current:
+                    if h.program_name:
+                        if h.program_name == curent_name and not h.is_enabled:
+                            self.enable_hook(h)
+                        elif hook.program_name != current_name and hook.is_enabled:
+                            self.disable_hook(h)
+                    libs = self.get_libraries(cpustate,current)
+                    if h.library_name:
+                        lowest_matching_lib = None
+                        if libs == ffi.NULL: continue
+                        for i in range(libs.num):
+                            lib = libs.module[i]
+                            if lib.file != ffi.NULL:
+                                filename = ffi.string(lib.file).decode()
+                                if h.library_name in filename:
+                                    if lowest_matching_lib:
+                                        lowest_matching_lib = lib if lib.base < lowest_matching_lib.base else lowest_matching_lib
+                                    else:
+                                        lowest_matching_lib = lib
+                        if lowest_matching_lib:
+                            self.update_hook(h, lowest_matching_lib.base + h.target_library_offset)
+                        else:
+                            self.disable_hook(h)
+
+
         def _register_internal_asid_changed_cb(self):
-                if self._registered_asid_changed_internal_cb:
+                '''
+                Call this function if you need procname filtering for callbacks. It enables
+                an internal callback on asid_changed (and sometimes an after_block_exec cb)
+                which will deteremine when the process name changes and enable/disable other callbacks
+                that filter on process name.
+                '''
+                if self._registered_asid_changed_internal_cb: # Already registered these callbacks
                         return
+
+                @pcb.after_block_exec
+                def __get_pending_procname_change(cpu, tb):
+                    if not self.in_kernel(cpu): # Once we're out of kernel code, grab procname
+                        name = self.get_process_name(cpu)
+                        asid = self.libpanda.panda_current_asid(cpu)
+                        self.asid_mapping[asid] = name
+                        self.procname_changed(name)
+                        self.disable_callback('__get_pending_procname_change') # Disabled to begin
+                    return 0
+
 
                 # Local function def
                 @pcb.asid_changed
                 def __asid_changed(cpustate, old_asid, new_asid):
+                    '''
+                    When the ASID changes, check if we know its procname (in self.asid_mapping),
+                    if so, call panda.procname_changed(name). Otherwise, we enable __get_pending_procname_change CB, which
+                    waits until the procname changes. Then we grab the new procname, update self.asid_mapping and call
+                    panda.procname_changed(name)
+                    '''
                     if old_asid == new_asid:
                         return 0
-                    current = self.get_current_process(cpustate)
-                    if current == ffi.NULL:
-                        return 0
-                    current_name = ffi.string(current.name).decode('utf8', 'ignore')
-                    for cb_name, cb in self.registered_callbacks.items():
-                        if not cb["procname"]:
-                            continue
-                        if current_name == cb["procname"] and not cb['enabled']:
-                            self.enable_callback_by_name(cb_name)
-                        if current_name != cb["procname"] and cb['enabled']:
-                            self.disable_callback_by_name(cb_name)
 
-                    for h in self.hook_list:
-                        if not h.is_kernel and ffi.NULL != current:
-                            if h.program_name:
-                                if h.program_name == curent_name and not h.is_enabled:
-                                    self.enable_hook(h)
-                                elif hook.program_name != current_name and hook.is_enabled:
-                                    self.disable_hook(h)
-                            libs = self.get_libraries(cpustate,current)
-                            if h.library_name:
-                                lowest_matching_lib = None
-                                if libs == ffi.NULL: continue
-                                for i in range(libs.num):
-                                    lib = libs.module[i]
-                                    if lib.file != ffi.NULL: 
-                                        filename = ffi.string(lib.file).decode()
-                                        if h.library_name in filename:
-                                            if lowest_matching_lib:
-                                                lowest_matching_lib = lib if lib.base < lowest_matching_lib.base else lowest_matching_lib
-                                            else:
-                                                lowest_matching_lib = lib
-                                if lowest_matching_lib:
-                                    self.update_hook(h, lowest_matching_lib.base + h.target_library_offset)
-                                else:
-                                    self.disable_hook(h)
+                    if new_asid not in self.asid_mapping: # We don't know this ASID->procname - turn on __get_pending_procname_change
+                        if not self.is_callback_enabled('__get_pending_procname_change'):
+                            self.enable_callback('__get_pending_procname_change')
+                    else: # We do know this ASID->procname, just call procname_changed
+                        self.procname_changed(self.asid_mapping[new_asid])
 
                     return 0
 
                 if debug:
                         progress("Registering internal callback to support procname filter")
 
+                self.register_callback(self.callback.asid_changed, __asid_changed, "__asid_changed") # Always call on ASID change
+
+
+                # This internal callback is only enabled on-demand (later) when we need to figure out ASID->procname mappings
+                self.register_callback(self.callback.after_block_exec, __get_pending_procname_change, "__get_pending_procname_change", enabled=False)
+
                 self._registered_asid_changed_internal_cb = True
-                self.register_callback(self.handle, self.callback.asid_changed, __asid_changed, "__asid_changed")
 
         def hook(self, addr, enabled=True, kernel=True, libraryname=None, procname=None):
                 '''
@@ -592,7 +644,7 @@ class Panda:
 
         def _generated_callback(self, pandatype, name=None, procname=None, enabled=True):
                 '''
-                Actual implementation of self.cb_XXX. pandatype is pcb.XXX
+                Actual implementation of self.cb_XYZ. pandatype is pcb.XYZ
                 name must uniquely describe a callback
                 if procname is specified, callback will only be enabled when that asid is running (requires OSI support)
                 '''
@@ -605,68 +657,73 @@ class Panda:
                         local_name = name  # We need a new varaible otherwise we have scoping issues with _generated_callback's name
                         if name is None:
                                 local_name = fun.__name__
-                        assert(self.handle is not None)
-                        if local_name in self.registered_callbacks:
-                            raise ValueError("Duplicate callback name {}".format(local_name))
-                        self.registered_callbacks[local_name] = {"procname": procname, "enabled": enabled, "callback": pandatype}
-                        self.register_callback(self.handle, pandatype, pandatype(fun), local_name)
-                        if not enabled: # Disable if necessary
-                                self.disable_callback_by_name(local_name)
+                        self.register_callback(pandatype, pandatype(fun), local_name, enabled=enabled, procname=procname)
                         def wrapper(*args, **kw):
                                 return fun(*args, **kw)
                         return wrapper
                 return decorator
 
-        def register_callback(self, handle, callback, function, name):
+        def register_callback(self, callback, function, name, enabled=True, procname=None):
+                # CB   = self.callback.main_loop_wait
+                # func = main_loop_wait_cb
+                # name = main_loop_wait
+
+                if name in self.registered_callbacks:
+                    raise ValueError("Duplicate callback name {}".format(name))
                 cb = callback_dictionary[callback]
+
+                # Generate a unique handle for each callback type using the number of previously registered CBs of that type added to a constant
+                handle = ffi.cast('void *', 0x8888 + 100*len([x for x in self.registered_callbacks.values() if x['callback'] == cb]))
+
                 pcb = ffi.new("panda_cb *", {cb.name:function})
+
+                if debug:
+                        progress("Registered function '{}' to run on callback {}".format(name, cb.name))
+
                 self.libpanda.panda_register_callback_helper(handle, cb.number, pcb)
-                self.pcb_list[callback] = (function,pcb, handle) # XXX: Should be append?
+                self.registered_callbacks[name] = {"procname": procname, "enabled": True, "callback": cb,
+                                                   "handle": handle, "pcb": pcb, "function": function} # XXX: if function is not saved here it gets GC'd and everything breaks! Watch out!
+
+                if not enabled: # Note the registered_callbacks dict starts with enabled true and then we update it to false as necessary here
+                    self.disable_callback(name)
+
                 if "block" in cb.name:
                         print("Warning: disabling TB chaining to support {} callback".format(cb.name))
                         self.disable_tb_chaining()
 
-                if debug:
-                        progress("registered function '{}' to run on callback {}".format(name, cb.name))
 
-        def enable_callback_by_name(self, name):
-                if name not in self.registered_callbacks.keys():
-                        raise RuntimeError("Cannot enable callback with unknown name {}".format(name))
-                self.registered_callbacks[name]['enabled'] = True
-                # XXX This should enable/disable by name, but for now we enable/disable the whole type
-                print("Warning, enabling all callbacks of type {}, not just {}".format(self.registered_callbacks[name]["callback"], name))
-                self.enable_callback(self.registered_callbacks[name]["callback"])
+        def is_callback_enabled(self, name):
+            if name not in self.registered_callbacks.keys():
+                raise RuntimeError("No callback has been registered with name '{}'".format(name))
+            return self.registered_callbacks[name]['enabled']
 
-        def disable_callback_by_name(self, name):
-                if name not in self.registered_callbacks.keys():
-                        raise RuntimeError("Cannot disable callback with unknown name {}".format(name))
-                self.registered_callbacks[name]['enabled'] = False
-                # XXX This should enable/disable by name, but for now we enable/disable the whole type
-                print("Warning, disabling all callbacks of type {}, not just {}".format(self.registered_callbacks[name]["callback"], name))
-                self.disable_callback(self.registered_callbacks[name]["callback"])
 
-        def enable_callback(self, callback):
-                if self.pcb_list[callback]:
-                        function, pcb, handle = self.pcb_list[callback]
-                        cb = callback_dictionary[callback]
-                        progress("enabled callback %s" % cb.name)
-                        self.libpanda.panda_enable_callback_helper(handle, cb.number, pcb)
-                        if "block" in cb.name:
-                                self.disable_tb_chaining()
-                else:
-                        progress("ERROR: plugin not registered");
+        def enable_callback(self, name):
+            '''
+            Enable a panda plugin using its handle and cb.number as a unique ID
+            '''
+            if name not in self.registered_callbacks.keys():
+                    raise RuntimeError("No callback has been registered with name '{}'".format(name))
 
-        def disable_callback(self,  callback):
-                if self.pcb_list[callback]:
-                        function,pcb,handle = self.pcb_list[callback]
-                        cb = callback_dictionary[callback]
-                        progress("disabled callback %s" % cb.name)
-                        self.libpanda.panda_disable_callback_helper(handle, cb.number, pcb)
-                        #if "block" in cb.name: # XXX can't simply reenable without more checks
-                        #       self.enable_tb_chaining()
-                else:
-                        progress("ERROR: plugin not registered");
+            self.registered_callbacks[name]['enabled'] = True
+            handle = self.registered_callbacks[name]['handle']
+            cb = self.registered_callbacks[name]['callback']
+            pcb = self.registered_callbacks[name]['pcb']
+            progress("Enabling callback '{}' on '{}' handle = {}".format(name, cb.name, handle))
+            self.libpanda.panda_enable_callback_helper(handle, cb.number, pcb)
 
+        def disable_callback(self, name):
+            '''
+            Disable a panda plugin using its handle and cb.number as a unique ID
+            '''
+            if name not in self.registered_callbacks.keys():
+                    raise RuntimeError("No callback has been registered with name '{}'".format(name))
+            self.registered_callbacks[name]['enabled'] = False
+            handle = self.registered_callbacks[name]['handle']
+            cb = self.registered_callbacks[name]['callback']
+            pcb = self.registered_callbacks[name]['pcb']
+            progress("Disabling callback '{}' on '{}' handle={}".format(name, cb.name, handle))
+            self.libpanda.panda_disable_callback_helper(handle, cb.number, pcb)
 
         def unload_plugin(self, name):
                 if debug:
@@ -679,9 +736,8 @@ class Panda:
                         progress ("Unloading all panda plugins")
 
                 # First unload python plugins
-                for cb in self.pcb_list:
-                        if len(self.pcb_list[cb]):
-                                self.disable_callback(cb)
+                for name in self.registered_callbacks.keys():
+                        self.disable_callback(name)
 
                 # Then unload C plugins
                 self.libpanda.panda_unload_plugins()
@@ -719,12 +775,6 @@ class Panda:
 
         def disable_llvm_helpers(self):
                 self.libpanda.panda_disable_llvm_helpers()
-
-        def enable_tb_chaining(self):
-                self.libpanda.panda_enable_tb_chaining()
-
-        def disable_tb_chaining(self):
-                self.libpanda.panda_disable_tb_chaining()
 
         def flush_tb(self):
                 return self.libpanda.panda_flush_tb()
@@ -1119,4 +1169,4 @@ class Panda:
                 self.run_monitor_cmd("end_record")
 
                 print("Finished recording")
-# vim: expandtab:tabstop=8:
+# vim: expandtab:tabstop=4:

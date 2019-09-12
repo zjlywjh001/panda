@@ -127,7 +127,11 @@ bool panda_load_external_plugin(const char *filename, const char *plugin_name, v
 }
 
 
-bool panda_load_plugin(const char *filename, const char *plugin_name, bool library_mode) {
+bool panda_load_plugin(const char *filename, const char *plugin_name) {
+  return _panda_load_plugin(filename, plugin_name, false);
+}
+
+bool _panda_load_plugin(const char *filename, const char *plugin_name, bool library_mode) {
     // don't load the same plugin twice
     uint32_t i;
     for (i=0; i<nb_panda_plugins_loaded; i++) {
@@ -234,7 +238,7 @@ void panda_require(const char *plugin_name) {
     char *plugin_path = panda_plugin_path(plugin_name);
 
     // load plugin same as in vl.c
-    if (!panda_load_plugin(plugin_path, plugin_name, false)) {
+    if (!panda_load_plugin(plugin_path, plugin_name)) {
         fprintf(stderr, PANDA_MSG_FMT "FAILED to load required plugin %s from %s\n", PANDA_CORE_NAME, plugin_name, plugin_path);
         abort();
     }
@@ -251,7 +255,7 @@ void panda_require_from_library(const char *plugin_name) {
     char *plugin_path = panda_plugin_path(plugin_name);
 
     // load plugin same as in vl.c
-    if (!panda_load_plugin(plugin_path, plugin_name, true)) {
+    if (!_panda_load_plugin(plugin_path, plugin_name, true)) { // Load in library mode
         fprintf(stderr, PANDA_MSG_FMT "FAILED to load required plugin %s from %s\n", PANDA_CORE_NAME, plugin_name, plugin_path);
         abort();
     }
@@ -1006,7 +1010,7 @@ void qmp_load_plugin(bool has_file_name, const char *file_name, const char *plug
         g_free(args);
     }
 
-    if(!panda_load_plugin(file_name, plugin_name, false)) {
+    if(!panda_load_plugin(file_name, plugin_name)) {
         // TODO: do something with errp here?
     }
 

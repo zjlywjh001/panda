@@ -29,8 +29,10 @@ extern panda_cb_list *panda_cbs[PANDA_CB_LAST];
 
 // plugin mgmt
 bool panda_load_external_plugin(const char *filename, const char *plugin_name, 
+
                                 void *plugin_uuid, void *init_fn_ptr);
-bool panda_load_plugin(const char *filename, const char *plugin_name, bool library_mode);
+bool panda_load_plugin(const char *filename, const char *plugin_name);
+bool _panda_load_plugin(const char *filename, const char *plugin_name, bool library_mode);
 char *panda_plugin_path(const char *name);
 void panda_require(const char *plugin_name);
 void panda_require_from_library(const char *plugin_name);
