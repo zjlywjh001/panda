@@ -34,10 +34,11 @@ def create_pypanda_header(filename):
     a += len(pypanda_start_pattern)
     b = contents.find(pypanda_end_pattern)
     if b == -1: return None
+    subcontents = contents[a:b]
     # look for local includes
     rest = []
     (plugin_dir,fn) = os.path.split(filename)
-    for line in contents.split("\n"):
+    for line in subcontents.split("\n"):
         foo = re.search('\#include "(.*)"$', line)
         if foo:
             nested_inc = foo.groups()[0]
@@ -45,13 +46,13 @@ def create_pypanda_header(filename):
             create_pypanda_header("%s/%s" % (plugin_dir,nested_inc))
         else:
             rest.append(line)
-    contents = "\n".join(rest)
+    new_contents = "\n".join(rest)
     foo = re.search("([^\/]+)\.h$", filename)
     assert (not (foo is None))
     pypanda_h = "./include/%s_pypanda.h" % foo.groups()[0]
     print("Creating pypanda header [%s] for [%s]" % (pypanda_h, filename))
     with open(pypanda_h, "w") as pyph:
-        pyph.write(contents[a:b])
+        pyph.write(new_contents)
     pypanda_headers.append(pypanda_h)
 
 
@@ -65,6 +66,7 @@ for plugin in os.listdir(plugins_dir):
         # just look for plugin_int_fns.h
         plugin_file = plugin + "_int_fns.h"
         if os.path.exists("%s/%s" % (plugin_dir, plugin_file)):
+            print("Examining [%s] for pypanda-awareness" % plugin_file)
             create_pypanda_header("%s/%s" % (plugin_dir, plugin_file))
                         
 
