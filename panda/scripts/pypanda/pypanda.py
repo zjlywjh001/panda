@@ -27,7 +27,7 @@ import qcows
 
 import pdb
 
-debug = False
+debug = True
 pandas = []
 
 def progress(msg):
@@ -68,6 +68,7 @@ def make_iso(directory, iso_path):
         else:
             raise NotImplementedError("Unsupported operating system!")
 
+
 # main_loop_wait_cb is called at the start of the main cpu loop in qemu.
 # This is a fairly safe place to call into qemu internals but watch out for deadlocks caused
 # by your request blocking on the guest's execution
@@ -84,6 +85,8 @@ def main_loop_wait_cb():
         # Then run any and all requested commands
         global main_loop_wait_fnargs
         global main_loop_wait_cbargs
+        if len(main_loop_wait_fnargs) == 0: return
+#        progress("Entering main_loop_wait_cb")
         for fnargs, cbargs in zip(main_loop_wait_fnargs, main_loop_wait_cbargs):
                 (fn, args) = fnargs
                 (cb, cb_args) = cbargs
@@ -102,6 +105,7 @@ def main_loop_wait_cb():
                                 raise e
         main_loop_wait_fnargs = []
         main_loop_wait_cbargs = []
+#        progress("Exiting main_loop_wait_cb")
 
 
 @pcb.pre_shutdown
@@ -403,7 +407,7 @@ class Panda:
                 self.libpanda.panda_cont()
                 self.running.set()
 
-        def snap(self, snapshot_name):
+        def snap(self, snapshot_name, cont=True):
                 if debug:
                         progress ("Creating snapshot " + snapshot_name)
                 # vm_stop(), so stop executing guest code
@@ -413,7 +417,8 @@ class Panda:
                 charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
                 self.queue_main_loop_wait_fn(self.libpanda.panda_snap, [charptr])
                 # and right after that we will do a vm_start
-                self.queue_main_loop_wait_fn(self.libpanda.panda_cont, []) # so this 
+                if cont:
+                        self.queue_main_loop_wait_fn(self.libpanda.panda_cont, []) # so this 
 
 
         def delvm(self, snapshot_name, now):
@@ -814,6 +819,22 @@ class Panda:
             if not hasattr(self, "_memcb"):
                 self.enable_memcb()
             return self.libpanda.panda_virtual_memory_write_external(env, addr, buf, length)
+
+
+# uint32_t get_callers(target_ulong *callers, uint32_t n, CPUState *cpu);
+
+        def callstack_callers(self, lim, cpu):
+                if not hasattr(self, "libpanda_callstack_instr"):
+                        progress("enabling callstack_instr plugin")
+                        self.require("callstack_instr")
+                
+                callers = ffi.new("uint32_t[%d]" % lim)
+                n = self.libpanda_callstack_instr.get_callers(callers, lim, cpu)
+                c = []
+                for pc in callers:
+                        c.append(pc)
+                return c
+    
 
         def taint_enable(self, cont=True):
                 if not self.taint_enabled:
