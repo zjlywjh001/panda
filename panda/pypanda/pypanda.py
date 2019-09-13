@@ -518,7 +518,7 @@ class Panda:
 
 
         def procname_changed(self, name):
-            print(f"Changed to process {name}")
+            #print(f"Changed to process {name}")
 
             for cb_name, cb in self.registered_callbacks.items():
                 if not cb["procname"]:
@@ -595,11 +595,7 @@ class Panda:
 
                     return 0
 
-                if debug:
-                        progress("Registering internal callback to support procname filter")
-
                 self.register_callback(self.callback.asid_changed, __asid_changed, "__asid_changed") # Always call on ASID change
-
 
                 # This internal callback is only enabled on-demand (later) when we need to figure out ASID->procname mappings
                 self.register_callback(self.callback.after_block_exec, __get_pending_procname_change, "__get_pending_procname_change", enabled=False)
@@ -694,8 +690,9 @@ class Panda:
                     self.disable_callback(name)
 
                 if "block" in cb.name:
+                    if not self.disabled_tb_chaining:
                         print("Warning: disabling TB chaining to support {} callback".format(cb.name))
-                        self.disable_tb_chaining()
+                    self.disable_tb_chaining()
 
 
         def is_callback_enabled(self, name):
@@ -715,7 +712,7 @@ class Panda:
             handle = self.registered_callbacks[name]['handle']
             cb = self.registered_callbacks[name]['callback']
             pcb = self.registered_callbacks[name]['pcb']
-            progress("Enabling callback '{}' on '{}' handle = {}".format(name, cb.name, handle))
+            #progress("Enabling callback '{}' on '{}' handle = {}".format(name, cb.name, handle))
             self.libpanda.panda_enable_callback_helper(handle, cb.number, pcb)
 
         def disable_callback(self, name):
@@ -728,7 +725,7 @@ class Panda:
             handle = self.registered_callbacks[name]['handle']
             cb = self.registered_callbacks[name]['callback']
             pcb = self.registered_callbacks[name]['pcb']
-            progress("Disabling callback '{}' on '{}' handle={}".format(name, cb.name, handle))
+            #progress("Disabling callback '{}' on '{}' handle={}".format(name, cb.name, handle))
             self.libpanda.panda_disable_callback_helper(handle, cb.number, pcb)
 
         def unload_plugin(self, name):
@@ -1167,7 +1164,7 @@ class Panda:
                 progress(self.run_serial_cmd(setup_sh))
 
         @blocking
-        def record_cmd(self, guest_command, copy_directory=None, iso_name=None, recording_name="recording"):
+        def record_cmd(self, guest_command, copy_directory=None, iso_name=None, recording_name="recording", ignore_errors=False):
                 self.revert_sync("root") # Can't use self.revert because that would would run async and we'd keep going before the revert happens
 
                 if copy_directory: # If there's a directory, build an ISO and put it in the cddrive
@@ -1186,6 +1183,14 @@ class Panda:
                 if debug:
                         progress("Result of `{}`:".format(guest_command))
                         print("\t"+"\n\t".join(result.split("\n"))+"\n")
+
+                if "No such file or directory" in result and not ignore_errors:
+                    print("Bad output running command: {}".format(result))
+                    raise RuntimeError("Command not found while taking recording")
+
+                if "cannot execute binary file" in result and not ignore_errors:
+                    print("Bad output running command: {}".format(result))
+                    raise RuntimeError("Could not execute binary while taking recording")
 
                 # 5) End recording
                 self.run_monitor_cmd("end_record")
