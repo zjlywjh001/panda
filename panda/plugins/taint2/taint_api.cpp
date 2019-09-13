@@ -506,13 +506,15 @@ void taint2_query_results_iter(QueryResult *qr) {
 // Return next taint label in iteration over labelset in qr.
 // Also, sets *next to false if that was in fact the last value
 // things will go badly if you ignore that setting of *next and call this again, maybe?
-TaintLabel taint2_query_result_next(QueryResult *qr, bool *next) {
+TaintLabel taint2_query_result_next(QueryResult *qr, bool *done) {
 	// get next label
-	TaintLabel l = *(*((LabelSetIter *) qr->it_curr));
-	// iterate
-	(*((LabelSetIter *) qr->it_curr))++;
+	TaintLabel l = *(*(LabelSetIter *) qr->it_curr);
+
+	// Increment iterator
+  (*(LabelSetIter*)qr->it_curr)++;
+
 	// detect if we've iterated to the end
-	*next = (((void *) ((LabelSetIter *) qr->it_curr)) != qr->it_end);
+  *done = (*(LabelSetIter*)qr->it_curr == *(LabelSetIter*)qr->it_end);
 	return l;
 }
 	
