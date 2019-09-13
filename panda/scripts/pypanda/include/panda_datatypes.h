@@ -20,7 +20,7 @@
 
 typedef enum panda_cb_type {
     PANDA_CB_BEFORE_BLOCK_TRANSLATE, // Before translating each basic block
-    PANDA_CB_AFTER_BLOCK_TRANSLATE,  // After translating each basic block
+   PANDA_CB_AFTER_BLOCK_TRANSLATE,  // After translating each basic block
     PANDA_CB_BEFORE_BLOCK_EXEC_INVALIDATE_OPT, // Before executing each basic
                                                // block (with option to
                                                // invalidate, may trigger
@@ -74,6 +74,8 @@ typedef enum panda_cb_type {
 
     PANDA_CB_MAIN_LOOP_WAIT,       // you can run monitor cmds here (bc you are in right thread)
     PANDA_CB_PRE_SHUTDOWN,       // you can run monitor cmds here (bc you are in right thread)
+
+    PANDA_CB_BEFORE_HANDLE_EXCEPTION,   // allows you to monitor but also change / swallow exceptions
 
     PANDA_CB_LAST
 } panda_cb_type;
@@ -698,6 +700,30 @@ typedef union panda_cb {
          None
      */
     void (*pre_shutdown)(void);
+
+
+    /* Callback ID:     PANDA_CB_BEFORE_HANDLE_EXCEPTION
+
+       before_handle_exception: Called just before we are about to
+       handle an exception.  
+
+       Note: only called for cpu->exception_index > 0
+      
+       Aguments: 
+         exception_index (the current exception number)
+
+       Return value:
+         a new exception_index.  
+
+       Note: There might be more than one callback for this location.
+       First callback that returns an exception index that *differs*
+       from the one passed as an arg wins. That is what we return as
+       the new exception index, which will replace
+       cpu->exception_index
+      
+     */
+
+    int32_t (*before_handle_exception)(CPUState *cpu, int32_t exception_index);
 
 
     /* Dummy union member.
