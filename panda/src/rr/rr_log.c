@@ -1221,7 +1221,7 @@ struct timeval replay_start_time;
 // size)
 void replay_progress(void)
 {
-    if (rr_nondet_log) {
+    if (rr_nondet_log && !panda_library_mode) { // Silent if no nondet_log or if we're replaying in library mode
         if (rr_log_is_empty()) {
             printf("%s:  log is empty.\n", rr_nondet_log->name);
         } else {
@@ -1452,8 +1452,10 @@ void rr_do_end_record(void)
 
     time_t rr_end_time;
     time(&rr_end_time);
-    printf("Time taken was: %ld seconds.\n", rr_end_time - rr_start_time);
-    printf("Checksum of guest memory: %#08x\n", rr_checksum_memory_internal());
+    if (!panda_library_mode)  {
+      printf("Time taken was: %ld seconds.\n", rr_end_time - rr_start_time);
+      printf("Checksum of guest memory: %#08x\n", rr_checksum_memory_internal());
+    }
 
     // log_all_cpu_states();
 
@@ -1552,39 +1554,37 @@ void rr_do_end_replay(int is_error)
     replay_progress();
     if (is_error) {
         printf("ERROR: replay failed!\n");
-    } else {
-        printf("Replay completed successfully. 1\n");
     }
 
-    time_t rr_end_time;
-    time(&rr_end_time);
-    printf("Time taken was: %ld seconds.\n", rr_end_time - rr_start_time);
+    if (!panda_library_mode)  {
+      time_t rr_end_time;
+      time(&rr_end_time);
+      printf("Time taken was: %ld seconds.\n", rr_end_time - rr_start_time);
 
-    printf("Stats:\n");
-    int i;
-    for (i = 0; i < RR_LAST; i++) {
-        printf("%s number = %llu, size = %llu bytes\n",
-               get_log_entry_kind_string(i), rr_number_of_log_entries[i],
-               rr_size_of_log_entries[i]);
-        rr_number_of_log_entries[i] = 0;
-        rr_size_of_log_entries[i] = 0;
+      printf("Stats:\n");
+      int i;
+      for (i = 0; i < RR_LAST; i++) {
+          printf("%s number = %llu, size = %llu bytes\n",
+                 get_log_entry_kind_string(i), rr_number_of_log_entries[i],
+                 rr_size_of_log_entries[i]);
+          rr_number_of_log_entries[i] = 0;
+          rr_size_of_log_entries[i] = 0;
+      }
+      printf("max_queue_len = %llu\n", rr_max_num_queue_entries);
+
+      printf("Checksum of guest memory: %#08x\n", rr_checksum_memory_internal());
     }
-    printf("max_queue_len = %llu\n", rr_max_num_queue_entries);
     rr_max_num_queue_entries = 0;
-
-    printf("Checksum of guest memory: %#08x\n", rr_checksum_memory_internal());
 
     // mz some more sanity checks - the queue should contain only the RR_LAST
     // element
-    if (rr_queue_head == rr_queue_tail && rr_queue_head != NULL &&
+    if (is_error) {
+        printf("ERROR: replay failed!\n");
+    } else if (rr_queue_head == rr_queue_tail && rr_queue_head != NULL &&
         rr_queue_head->header.kind == RR_END_OF_LOG) {
-        printf("Replay completed successfully 2.\n");
+        printf("Replay completed successfully\n");
     } else {
-        if (is_error) {
-            printf("ERROR: replay failed!\n");
-        } else {
-            printf("Replay terminated at user request.\n");
-        }
+        printf("Replay terminated at user request.\n");
     }
     rr_queue_head = NULL;
     rr_queue_tail = NULL;
