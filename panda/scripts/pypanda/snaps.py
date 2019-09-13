@@ -2,7 +2,7 @@
 
 from pypanda import *
 import os
-from sys import argv
+from sys import argv,exit
 
 #
 # snaps.py
@@ -38,70 +38,73 @@ state = 0 # before snapshot load
 
 @panda.callback.after_machine_init
 def machinit(env):
-	global state
+        global state
 
-	progress("Machine initialized -- disabling chaining & reverting to booted snapshot\n")
-	panda.disable_tb_chaining()
-	panda.delvm("newroot", now=True)
-	pc = panda.current_pc(env)
-	panda.revert("root", now=True)
-	pc = panda.current_pc(env)
-	progress("After revert: pc=%lx" % pc)
-	state = 1
+        progress("Machine initialized -- disabling chaining & reverting to booted snapshot\n")
+        panda.disable_tb_chaining()
+        panda.delvm("newroot", now=True)
+        pc = panda.current_pc(env)
+        panda.revert("root", now=True)
+        pc = panda.current_pc(env)
+        progress("After revert: pc=%lx" % pc)
+        state = 1
 
 
 
 init_done = False
 
 nt = 0
-
+nr = 0
 
 @panda.callback.before_block_exec
 def before_block_exec(env,tb):
-	global nt
-	global state
-	if not init_done:
-		return 0
+        global nt,nr,state
+        if not init_done:
+                return 0
 
-	if state == 0:
-		return 0
+        if state == 0:
+                return 0
 
-	pc = panda.current_pc(env)
-#	print("state = %d pc=%x" % (state,pc))
-	
-	if (state <= 33):
-		progress("Before block exec: state=%d pc=%lx" % (state,pc))
+        pc = panda.current_pc(env)
+#       print("state = %d pc=%x" % (state,pc))
+        
+        if (state < 4):
+                progress("Before block exec: state=%d pc=%lx" % (state,pc))
 
-	if (state == 1):
-		assert (pc == 0xc12c4648)
-		state = 2
+        if (state == 1):
+                assert (pc == 0xc12c4648)
+                state = 2
 
-	if (state == 2 and pc == 0xc101dfec):
-		progress ("\nCreating 'newroot' snapshot at 0xc101dfec")
-		panda.snap("newroot")
-		state = 3
-		return 1
+        if (state == 2 and pc == 0xc101dfec):
+                progress ("\nCreating 'newroot' snapshot at 0xc101dfec")
+                panda.snap("newroot")
+                state = 3
+                return 1
 
-	if state == 3:
-		nt = nt + 1
-		if nt == 10:
-			progress("\nRestoring 'newroot' snapshot")
-			panda.revert("newroot", now=False)
-			nt = 0
-			state = 3
-		return 1
-			
-	return 0
+        if state == 3:
+                nt = nt + 1
+                if nt == 10:
+                        progress("Restoring 'newroot' snapshot nr=%d" % nr)
+                        panda.revert("newroot", now=False)
+                        nt = 0
+                        nr += 1
+                        if nr == 10:
+                                state = 4
+                                panda.stop()
+                                exit()
+                return 1
 
-	
+        return 0
+
+        
 
 # this is the initialiation for this plugin
 @panda.callback.init
 def init(handle):
-	progress("Init of Fwi plugin -- in python. handle="+str(handle))
-	panda.register_callback(handle, panda.callback.after_machine_init, machinit)
-	panda.register_callback(handle, panda.callback.before_block_exec, before_block_exec)
-	return True
+        progress("Init of Fwi plugin -- in python. handle="+str(handle))
+        panda.register_callback(handle, panda.callback.after_machine_init, machinit)
+        panda.register_callback(handle, panda.callback.before_block_exec, before_block_exec)
+        return True
 
 
 panda.load_python_plugin(init,"Fwi")
