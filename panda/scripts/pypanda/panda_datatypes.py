@@ -26,6 +26,7 @@ ffi.cdef(read_cleanup_header("include/panda_datatypes.h"))
 ffi.cdef(read_cleanup_header("include/panda_osi.h"))
 ffi.cdef(read_cleanup_header("include/panda_osi_linux.h"))
 ffi.cdef(read_cleanup_header("include/hooks.h"))
+ffi.cdef(read_cleanup_header("./include/callstack_instr_int_fns_pypanda.h"))
 ffi.cdef(read_cleanup_header("./include/addr_pypanda.h"))
 ffi.cdef(read_cleanup_header("./include/query_res_pypanda.h"))
 ffi.cdef(read_cleanup_header("./include/taint2_int_fns_pypanda.h"))
@@ -79,7 +80,8 @@ after_machine_init \
 top_loop \
 during_machine_init \
 main_loop_wait \
-pre_shutdown ")
+pre_shutdown \
+before_handle_exception ")
 
 
 pcb = PandaCB(init = pyp.callback("bool(void*)"), 
@@ -120,7 +122,8 @@ after_machine_init = pyp.callback("void (CPUState *)"),
 top_loop = pyp.callback("void (CPUState *)"),
 during_machine_init = pyp.callback("void (MachineState *)"),
 main_loop_wait = pyp.callback("void (void)"),
-pre_shutdown = pyp.callback("void (void)"))
+pre_shutdown = pyp.callback("void (void)"),
+before_handle_exception = pyp.callback("int32_t (CPUState *, int32_t)"))
 
 
 pandacbtype = namedtuple("pandacbtype", "name number")
@@ -166,7 +169,8 @@ pcb.after_machine_init : pandacbtype("after_machine_init", C.PANDA_CB_AFTER_MACH
 pcb.top_loop : pandacbtype("top_loop", C.PANDA_CB_TOP_LOOP),
 pcb.during_machine_init : pandacbtype("during_machine_init", C.PANDA_CB_DURING_MACHINE_INIT),
 pcb.main_loop_wait : pandacbtype("main_loop_wait", C.PANDA_CB_MAIN_LOOP_WAIT),
-pcb.pre_shutdown : pandacbtype("pre_shutdown", C.PANDA_CB_PRE_SHUTDOWN)}
+pcb.pre_shutdown : pandacbtype("pre_shutdown", C.PANDA_CB_PRE_SHUTDOWN),
+pcb.before_handle_exception : pandacbtype("before_handle_exception", C.PANDA_CB_BEFORE_HANDLE_EXCEPTION)}
 
 class Hook(object):
     def __init__(self,is_enabled=True,is_kernel=True,hook_cb=True,target_addr=0,target_library_offset=0,library_name=None,program_name=None):
