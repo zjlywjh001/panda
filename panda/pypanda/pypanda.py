@@ -17,7 +17,7 @@ from colorama import Fore, Style
 from random import randint
 from inspect import signature
 from tempfile import NamedTemporaryFile
-from taint_query import *
+from taint_query import TaintQuery
 
 from panda_datatypes import *
 from panda_expect import Expect

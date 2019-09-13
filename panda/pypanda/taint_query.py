@@ -25,7 +25,7 @@ class TaintQuery:
 #        print("after calling taint2_query_result_next")
         # this means there aren't any more labels
         # for next time
-        if done:
+        if ffi.unpack(done,1)[0]:
             self.no_more = True
         return label
 
