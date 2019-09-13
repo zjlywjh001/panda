@@ -4,7 +4,7 @@ from pypanda import *
 from panda_x86_helper import *
 from sys import argv, stdout
 import os
-#from capstone import *
+from capstone import *
 
 #md = Cs(CS_ARCH_X86, CS_MODE_64)
 
@@ -12,11 +12,6 @@ import os
 
 arch = "i386" if len(argv) <= 1 else argv[1]
 panda = Panda(generic=arch)
-
-#qcowpath = os.getenv("HOME") + "/.panda/debian:3.2.0-4-686-pae-i386-128M.qcow"
-
-
-#panda = Panda(qcow=qcowpath, extra_args="-D ./qemu.log -d in_asm") 
 
 
 
