@@ -380,28 +380,54 @@ int runstate_is_running(void);
 
 void panda_callbacks_main_loop_wait(void) {
     panda_cb_list *plist;
-//    printf ("In panda_callbacks_main_loop_wait\n");
-    int n = 0;
     for (plist = panda_cbs[PANDA_CB_MAIN_LOOP_WAIT]; plist != NULL;
          plist = panda_cb_list_next(plist)) {
-        plist->entry.main_loop_wait();
-        n ++;
+        if (plist->enabled) plist->entry.main_loop_wait();
     }
-//    printf ("... %d callbacks.  panda_exit_loop=%d runstate_is_running=%d panda_stopped=%d\n", n, panda_exit_loop, runstate_is_running(), panda_stopped);
-
     if (panda_exit_loop) {
-        //       printf ("Clearing panda_exit_loop\n");
         panda_exit_loop = false;
     }
 }
 
 void panda_callbacks_pre_shutdown(void) {
     panda_cb_list *plist;
-    //printf ("In panda_callbacks_pre_shutdown\n");
-    int n = 0;
     for (plist = panda_cbs[PANDA_CB_PRE_SHUTDOWN]; plist != NULL;
          plist = panda_cb_list_next(plist)) {
-        plist->entry.main_loop_wait();
-        n ++;
+        if (plist->enabled) plist->entry.main_loop_wait();
     }
 }
+
+
+
+// this callback allows us to swallow exceptions
+// 
+// first callback that returns an exception index that *differs* from
+// the one passed as an arg wins. That is, that is what we return as
+// the new exception index, which will replace cpu->exception_index
+// 
+// Note: We still run all of the callbacks, but only one of them can 
+// change the current cpu exception.  Sorry.
+// 
+int32_t panda_callbacks_before_handle_exception(CPUState *cpu, int32_t exception_index) {
+    panda_cb_list *plist;
+    bool got_new_exception = false;
+    int32_t new_exception;
+
+    for (plist = panda_cbs[PANDA_CB_BEFORE_HANDLE_EXCEPTION]; plist != NULL;
+         plist = panda_cb_list_next(plist)) {
+        if (plist->enabled) {
+            int32_t new_e = plist->entry.before_handle_exception(cpu, exception_index);
+            if (!got_new_exception && new_e != exception_index) {
+                got_new_exception = true;
+                new_exception = new_e;
+            }
+        }                
+    }
+
+    if (got_new_exception) 
+        return new_exception;
+
+    return exception_index;
+     
+}
+         

@@ -504,7 +504,8 @@ static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
         cpu_breakpoint_remove_by_instr(cpu, cpu->last_gdb_instr-1, BP_GDB);
         cpu->reverse_flags = 0;
     }
-    
+
+    cpu->exception_index = panda_callbacks_before_handle_exception(cpu, cpu->exception_index);
 
     if (cpu->exception_index >= 0) {
         if (cpu->exception_index >= EXCP_INTERRUPT) {
@@ -822,6 +823,7 @@ int cpu_exec(CPUState *cpu)
 
             panda_before_find_fast();
             TranslationBlock *tb = tb_find(cpu, last_tb, tb_exit);
+
             panda_bb_invalidate_done = panda_callbacks_after_find_fast(
                     cpu, tb, panda_bb_invalidate_done, &panda_invalidate_tb);
         

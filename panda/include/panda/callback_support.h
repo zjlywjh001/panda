@@ -57,4 +57,7 @@ void panda_callbacks_serial_write(CPUState *cpu, uint64_t fifo_addr,
 void panda_callbacks_main_loop_wait(void);
 void panda_callbacks_pre_shutdown(void);
 
+int32_t panda_callbacks_before_handle_exception(CPUState *cpu, int32_t exception_index);
+
+
 #endif
