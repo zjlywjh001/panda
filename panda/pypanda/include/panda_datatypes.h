@@ -7,7 +7,7 @@
 
 
 // -----------------------------------
-// Pull number 1 from ../../include/panda/panda_callback_list.h
+// Pull number 1 from ../include/panda/panda_callback_list.h
 
 
 // Just the enum defining callback numbering
@@ -743,7 +743,7 @@ typedef union panda_cb {
 
 
 // -----------------------------------
-// Pull number 2 from ../../include/panda/panda_plugin_mgmt.h
+// Pull number 2 from ../include/panda/panda_plugin_mgmt.h
 
 //  Manage plugins (load, enable, disable, etc).
 //  and callbacks (regster, unregister, etc) .
@@ -773,10 +773,13 @@ extern panda_cb_list *panda_cbs[PANDA_CB_LAST];
 
 // plugin mgmt
 bool panda_load_external_plugin(const char *filename, const char *plugin_name, 
+
                                 void *plugin_uuid, void *init_fn_ptr);
 bool panda_load_plugin(const char *filename, const char *plugin_name);
+bool _panda_load_plugin(const char *filename, const char *plugin_name, bool library_mode);
 char *panda_plugin_path(const char *name);
 void panda_require(const char *plugin_name);
+void panda_require_from_library(const char *plugin_name);
 void panda_do_unload_plugin(int index);
 void panda_unload_plugin(void* plugin);
 void panda_unload_plugin_idx(int idx);
@@ -797,7 +800,7 @@ panda_cb_list* panda_cb_list_next(panda_cb_list* plist);
 
 
 // -----------------------------------
-// Pull number 3 from ../../include/panda/panda_args.h
+// Pull number 3 from ../include/panda/panda_args.h
 
 // Fns and structs to do with panda arg parsing 
 
@@ -860,7 +863,7 @@ extern int panda_argc;
 
 
 // -----------------------------------
-// Pull number 4 from ../../include/panda/panda_api.h
+// Pull number 4 from ../include/panda/panda_api.h
 
 // Functions considered part of the panda api that come from
 // panda_api.c. Also some from common.c. Note that, while common.c has
@@ -890,16 +893,16 @@ void panda_disable_llvm_helpers(void);
 void panda_memsavep(FILE *f);
 
 // from panda_api.c
-int panda_pre(int argc, char **argv, char **envp);
 int panda_init(int argc, char **argv, char **envp);
 int panda_run(void);
-void panda_stop(void);
+void panda_set_library_mode(bool);
+void panda_stop(int code);
 void panda_cont(void);
+void panda_start_pandalog(const char *name);
 int panda_revert(char *snapshot_name);
 int panda_snap(char *snapshot_name);
 int panda_replay(char *replay_name);
 int panda_finish(void);
-
 
 void panda_set_qemu_path(char* filepath);
 
@@ -920,8 +923,6 @@ bool panda_in_kernel_external(CPUState *cpu);
 
 //void panda_monitor_run(char* buf, uint32_t len);
 int panda_delvm(char *snapshot_name);
-void panda_exit_emul_loop(void);
-
 
 
 // Create a monitor for panda
@@ -949,7 +950,7 @@ bool panda_taint_check_reg(uint32_t reg_num, uint32_t size) ;
 
 
 // -----------------------------------
-// Pull number 5 from ../../include/panda/panda_os.h
+// Pull number 5 from ../include/panda/panda_os.h
 
 // this stuff is defined / used in common.c
 
@@ -970,13 +971,17 @@ typedef target_ulong target_ptr_t;
 
 
 // -----------------------------------
-// Pull number 6 from ../../include/panda/panda_common.h
+// Pull number 6 from ../include/panda/panda_common.h
 
 
 void panda_cleanup(void);
 void panda_set_os_name(char *os_name);
 void panda_before_find_fast(void);
 void panda_disas(FILE *out, void *code, unsigned long size);
+void panda_break_main_loop(void);
+
+extern bool panda_break_cpu_loop_req;
+extern bool panda_break_vl_loop_req;
 
 /*
  * @brief Returns the guest address space identifier.

@@ -374,7 +374,6 @@ typedef enum RunState {
 } RunState;
 */
 
-extern bool panda_exit_loop;
 extern bool panda_stopped;
 int runstate_is_running(void);
 
@@ -384,8 +383,10 @@ void panda_callbacks_main_loop_wait(void) {
          plist = panda_cb_list_next(plist)) {
         if (plist->enabled) plist->entry.main_loop_wait();
     }
-    if (panda_exit_loop) {
-        panda_exit_loop = false;
+
+    if (panda_break_cpu_loop_req) {
+        //       printf ("Clearing panda_break_cpu_loop_req\n");
+        panda_break_cpu_loop_req = false;
     }
 }
 
@@ -393,7 +394,7 @@ void panda_callbacks_pre_shutdown(void) {
     panda_cb_list *plist;
     for (plist = panda_cbs[PANDA_CB_PRE_SHUTDOWN]; plist != NULL;
          plist = panda_cb_list_next(plist)) {
-        if (plist->enabled) plist->entry.main_loop_wait();
+        plist->entry.pre_shutdown();
     }
 }
 

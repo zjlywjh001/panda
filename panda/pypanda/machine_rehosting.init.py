@@ -22,12 +22,7 @@ def add_c_structure(obj, s):
 		c_dict[s] = n
 	return c_dict[s]
 
-@panda.callback.init
-def init(handle):
-	panda.register_callback(handle, panda.callback.during_machine_init, during_machine_init)
-	return True
-
-@panda.callback.during_machine_init
+@panda.cb_during_machine_init
 def during_machine_init(machinestate):
 	
 	#Constants
@@ -194,11 +189,4 @@ def during_machine_init(machinestate):
         
 
 #panda = Panda(qcow="/home/alom/ubuntu-14.04-server-cloudimg-i386-disk1.img")
-
-panda.load_python_plugin(init,"make_configurable_device")
-print ("pypanda: loaded plugin -- running")
-
-panda.init()
-print ("pypanda: panda initialized")
-
 panda.run()

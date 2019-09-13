@@ -108,6 +108,7 @@ bool before_block_exec_invalidate_opt(CPUState *cpu, TranslationBlock *tb) {
     return ret;
 }
 
+
 bool init_plugin(void *_self) {
     // On init, register a callback but don't enable it
     self = _self;

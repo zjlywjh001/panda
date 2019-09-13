@@ -18,35 +18,27 @@ from sys import argv
 arch = "i386" if len(argv) <= 1 else argv[1]
 panda = Panda(generic=arch)
 
-@panda.callback.init
-def init(handle):
-	progress("init in python. handle="+str(handle))
-	panda.register_callback(handle, panda.callback.before_block_exec, \
-							before_block_execute)
-	panda.register_callback(handle, panda.callback.after_block_exec,  \
-							after_block_execute)
-	return True
-
 count = 0
 
-@panda.callback.before_block_exec
+@panda.cb_before_block_exec(name="before")
 def before_block_execute(cpustate,transblock):
 	global count
 	if count < 9:
 		progress("before block in python %d" %count)
 	if count == 2:
-		panda.disable_callback(panda.callback.after_block_exec)
+		panda.disable_callback("after")
 	if count == 4:
-		panda.enable_callback(panda.callback.after_block_exec)
+		panda.enable_callback("after")
 	count+=1
 	return 0
 
-@panda.callback.after_block_exec
+@panda.cb_after_block_exec(name="after")
 def after_block_execute(cpustate,transblock):
 	global count
 	if count < 9:
 		progress("after block in python %d" % count)
+	else:
+		panda.end_analysis()
 	return 0
 
-panda.load_python_plugin(init,"example_disable_callbacks")
 panda.run()

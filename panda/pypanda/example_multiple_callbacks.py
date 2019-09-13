@@ -15,27 +15,17 @@ from sys import argv
 arch = "i386" if len(argv) <= 1 else argv[1]
 panda = Panda(generic=arch)
 
-@panda.callback.init
-def init(handle):
-	progress("init in python. handle="+str(handle))
-	panda.register_callback(handle, panda.callback.before_block_exec,\
-							before_block_execute)
-	panda.register_callback(handle, panda.callback.after_block_exec, \
-							after_block_execute)
-	return True
-
-@panda.callback.before_block_exec
-def before_block_execute(cpustate,transblock):
+@panda.cb_before_block_exec
+def my_before_block_execute(cpustate,transblock):
 	progress("before block in python")
 	sleep(sleeptime)
 	return 0
 
-@panda.callback.after_block_exec
-def after_block_execute(cpustate,transblock):
+@panda.cb_after_block_exec
+def my_after_block_execute(cpustate,transblock):
 	progress("after block in python")
 	sleep(sleeptime)
 	return 0
 
 sleeptime = 1
-panda.load_python_plugin(init,"example_multiple_callbacks")
 panda.run()
