@@ -107,4 +107,3 @@ uint32_t taint2_query_result_next(QueryResult *qr, bool *done);
 void taint2_query_reg_full(uint32_t reg_num, uint32_t offset, QueryResult *qr);
 
 
-// END_PYPANDA_NEEDS_THIS -- do not delet
