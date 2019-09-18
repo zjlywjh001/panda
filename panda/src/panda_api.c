@@ -158,6 +158,10 @@ target_ulong panda_current_sp_masked_pagesize_external(CPUState *cpu, target_ulo
 	return (panda_current_sp(cpu) & (~(mask+mask-1)));
 }
 
+target_ulong panda_virt_to_phys_external(CPUState *cpu, target_ulong virt_addr) {
+  return panda_virt_to_phys(cpu, virt_addr);
+}
+
 // we have this temporarily in callbacks.c -> to be moved here
 /*
 bool panda_load_external_plugin(const char *filename, const char *plugin_name, void *plugin_uuid, void *init_fn_ptr) {

@@ -39,6 +39,7 @@ int panda_revert(char *snapshot_name);
 int panda_snap(char *snapshot_name);
 int panda_replay(char *replay_name);
 int panda_finish(void);
+target_ulong panda_virt_to_phys_external(CPUState *cpu, target_ulong virt_addr);
 
 void panda_set_qemu_path(char* filepath);
 
