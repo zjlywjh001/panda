@@ -72,6 +72,8 @@ uint32_t taint2_query_result_next(QueryResult *qr, bool *done);
 
 void taint2_query_reg_full(uint32_t reg_num, uint32_t offset, QueryResult *qr);
 
+void taint2_query_ram_full(uint64_t pa, QueryResult *qr);
+
 }
 
 

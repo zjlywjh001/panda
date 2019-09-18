@@ -31,14 +31,18 @@ class TaintQuery:
 
 
     def __str__(self):
-        res = "(n=%d,tcn=%d,cb_mask=%x,labels=(" % (self.num_labels, self.tcn, self.cb_mask)
-        for l in self:
-            res += "%d," % l
-        res += "))"
-        return res
+        labels = ", ".join(map(str, self.get_labels()))
+        return "(n=%d,tcn=%d,cb_mask=%x,labels=(%s))" % (self.num_labels, self.tcn, self.cb_mask, labels)
 
     def __repr__(self):
         return self.__str__()
+
+    def get_labels(self):
+        ret = []
+        for l in self:
+            ret.append(l)
+        #self.reset() # Reset so we can query again
+        return ret
 
     # I think this should reset query result so we can 
     # iterate over labels again

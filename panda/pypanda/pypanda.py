@@ -165,23 +165,27 @@ class Panda:
 
                 biospath = realpath(pjoin(self.panda,"..", "..",  "pc-bios"))
                 bits = None
+                endianness = None # String 'little' or 'big'
                 if self.arch == "i386":
                         bits = 32
+                        endianness = 'little'
                 elif self.arch == "x86_64":
                         bits = 64
+                        endianness = 'little'
                 elif self.arch == "arm":
                         bits = 32
                 elif self.arch == "aarch64":
                         bit = 64
                 elif self.arch == "ppc":
                         bits = 32
-                else:
-                        print("For arch %s: I need logic to figure out num bits" % self.arch)
-                assert (not (bits == None))
+
+                assert (bits is not None), "For arch %s: I need logic to figure out num bits" % self.arch
+                assert (endianness is not None), "For arch %s: I need logic to figure out endianness" % self.arch
 
                 # set os string in line with osi plugin requirements e.g. "linux[-_]64[-_].+"
                 self.os_string = "%s-%d-%s" % (os,bits,os_version)
                 self.bits = bits
+                self.endianness = endianness
                 self.register_size = int(bits / 8)
 
                 # note: weird that we need panda as 1st arg to lib fn to init?
@@ -677,6 +681,8 @@ class Panda:
                 # Generate a unique handle for each callback type using the number of previously registered CBs of that type added to a constant
                 handle = ffi.cast('void *', 0x8888 + 100*len([x for x in self.registered_callbacks.values() if x['callback'] == cb]))
 
+                # XXX: We should have another layer of indirection here so we can catch
+                #      exceptions raised during execution of the CB and abort analysis
                 pcb = ffi.new("panda_cb *", {cb.name:function})
 
                 if debug:
@@ -926,11 +932,31 @@ class Panda:
             length_a = ffi.cast("int", length)
             self.libpanda.panda_virtual_memory_read_external(env, addr, buf_a, length_a)
 
+        def virtual_memory_read2(self, env, addr, length, fmt='bytearray'):
+            '''
+            Read but with an autogen'd buffer. Returns a bytearray
+            '''
+            buf = ffi.new("char[]", length)
+            self.virtual_memory_read(env, addr, buf, length)
+            r = ffi.unpack(buf, length)
+            if fmt == 'bytearray':
+                return r
+            elif fmt=='int':
+                return int.from_bytes(r, byteorder=self.endianness)  # XXX size better be small enough to pack into an int!
+            elif fmt=='str':
+                return ffi.string(buf, length)
+            else:
+                raise ValueError("fmt={} unsupported".format(fmt))
+
+
 
         def virtual_memory_write(self, env, addr, buf, length):
             if not hasattr(self, "_memcb"):
                 self.enable_memcb()
             return self.libpanda.panda_virtual_memory_write_external(env, addr, buf, length)
+
+        def virt_to_phys(self, env, addr):
+            return self.libpanda.panda_virt_to_phys_external(env, addr)
 
 
 # uint32_t get_callers(target_ulong *callers, uint32_t n, CPUState *cpu);
@@ -963,11 +989,25 @@ class Panda:
         # or at least four of them
         def taint_label_reg(self, reg_num, label):
                 self.taint_enable(cont=False)
-                if debug:
-                        progress("taint_reg reg=%d label=%d" % (reg_num, label))
-                #self.stop() #  What are you doing here?
+                #if debug:
+                #        progress("taint_reg reg=%d label=%d" % (reg_num, label))
+
+                # XXX must ensure labeling is done in a before_block_invalidate that rets 1
+                #     or some other safe way where the main_loop_wait code will always be run
+                #self.stop()
                 for i in range(self.register_size):
                         self.queue_main_loop_wait_fn(self.libpanda_taint2.taint2_label_reg, [reg_num, i, label])
+                self.queue_main_loop_wait_fn(self.libpanda.panda_cont, [])
+
+        def taint_label_ram(self, addr, label):
+                self.taint_enable(cont=False)
+                #if debug:
+                        #progress("taint_ram addr=0x%x label=%d" % (addr, label))
+
+                # XXX must ensure labeling is done in a before_block_invalidate that rets 1
+                #     or some other safe way where the main_loop_wait code will always be run
+                #self.stop()
+                self.queue_main_loop_wait_fn(self.libpanda_taint2.taint2_label_ram, [addr, label])
                 self.queue_main_loop_wait_fn(self.libpanda.panda_cont, [])
 
         # returns true if any bytes in this register have any taint labels
@@ -977,6 +1017,11 @@ class Panda:
                 for offset in range(self.register_size):
                         if self.libpanda_taint2.taint2_query_reg(reg_num, offset) > 0:
                                 return True
+
+        # returns true if this physical address is tainted
+        def taint_check_ram(self, addr):
+                if self.libpanda_taint2.taint2_query_ram(addr) > 0:
+                        return True
 
         # returns array of results, one for each byte in this register
         # None if no taint.  QueryResult struct otherwise
@@ -993,6 +1038,17 @@ class Panda:
                         else:
                                 res.append(None)
                 return res
+
+        # returns array of results, one for each byte in this register
+        # None if no taint.  QueryResult struct otherwise
+        def taint_get_ram(self, addr):
+                if self.libpanda_taint2.taint2_query_ram(addr) > 0:
+                        query_res = ffi.new("QueryResult *")
+                        self.libpanda_taint2.taint2_query_ram_full(addr, query_res)
+                        tq = TaintQuery(query_res, self.libpanda_taint2)
+                        return tq
+                else:
+                        return None
 
         def send_monitor_async(self, cmd, finished_cb=None, finished_cb_args=[]):
                 if debug:

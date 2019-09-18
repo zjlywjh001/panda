@@ -49,15 +49,13 @@ def taint_it(env, tb):
     if tb.pc in mappings and mappings[tb.pc] == "taint_me":
         global tainted
         if not tainted:
-            print("HIT PROP_TAINT 1")
+            print("Applying taint in taint_me function")
             tainted = True
             panda.taint_label_reg(panda_x86_helper.R_EAX, 10)
             panda.taint_label_reg(panda_x86_helper.R_EBX, 20)
             panda.taint_label_reg(panda_x86_helper.R_ECX, 30)
 
             return 1
-        #else:
-            #print("ALREADY TAINTED - RETRANS") # XXX Why twice?
     return 0
 
 @panda.cb_before_block_exec(procname=bin_name)
@@ -69,7 +67,7 @@ def bbe(env, tb):
             for reg_name, reg in panda_x86_helper.registers.items():
                 if panda.taint_check_reg(reg):
                     print("Taint of register {}".format(reg_name), panda.taint_get_reg(reg))
-            #panda.end_analysis() # XXX segfaults
+            panda.end_analysis() # XXX segfaults
     return 0
 
 panda.disable_tb_chaining()

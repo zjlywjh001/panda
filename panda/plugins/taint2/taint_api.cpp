@@ -531,3 +531,16 @@ void taint2_query_reg_full(uint32_t reg_num, uint32_t offset, QueryResult *qr) {
 	qr->ls = (void *) td.ls;  // this should be a (const std::set<TaintLabel> *) type
 	taint2_query_results_iter(qr);
 }
+//
+// pass in query result pre-allocated
+void taint2_query_ram_full(uint64_t pa, QueryResult *qr) {
+	// Hmm.  Doesn't this allocate a LabeSetP?
+	// are we leaking (if so we leaking in a bunch of other places)
+	Addr a = make_maddr(pa);
+	TaintData td = tp_query_full(a);
+	qr->num_labels = td.ls->size();
+	qr->tcn = td.tcn;
+	qr->cb_mask = td.cb_mask;
+	qr->ls = (void *) td.ls;  // this should be a (const std::set<TaintLabel> *) type
+	taint2_query_results_iter(qr);
+}

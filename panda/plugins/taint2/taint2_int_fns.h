@@ -120,6 +120,15 @@ uint32_t taint2_query_result_next(QueryResult *qr, bool *done);
 void taint2_query_reg_full(uint32_t reg_num, uint32_t offset, QueryResult *qr);
 
 
+// Places taint query results for this physical address in
+// returned qr.  qr's label set iterator is pre initialized, so there
+// is no need to call taint2_query_result_iter unless you want to
+// iterate through labels more than once).
+void taint2_query_ram_full(uint64_t pa, QueryResult *qr);
+
+// XXX what does this do?
+void taint2_query_results_iter(QueryResult *qr);
+
 // END_PYPANDA_NEEDS_THIS -- do not delete this comment!
 
 
