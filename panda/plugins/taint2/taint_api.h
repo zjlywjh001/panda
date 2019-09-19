@@ -66,7 +66,7 @@ void taint2_track_taint_state(void);
 
 //typedef uint32_t TaintLabel;
 
-void taint2_query_result_iter(QueryResult *qr);
+void taint2_query_results_iter(QueryResult *qr);
 
 uint32_t taint2_query_result_next(QueryResult *qr, bool *done);
 

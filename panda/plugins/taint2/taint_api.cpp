@@ -523,7 +523,7 @@ TaintLabel taint2_query_result_next(QueryResult *qr, bool *done) {
 // pass in query result pre-allocated
 void taint2_query_reg_full(uint32_t reg_num, uint32_t offset, QueryResult *qr) {
 	// Hmm.  Doesn't this allocate a LabeSetP ? 
-	// are we leaking (if so we leaking in a bunch of other places
+	// are we leaking (if so we leaking in a bunch of other places)
 	TaintData td = tp_query_full(make_greg(reg_num, offset));
 	qr->num_labels = td.ls->size();
 	qr->tcn = td.tcn;

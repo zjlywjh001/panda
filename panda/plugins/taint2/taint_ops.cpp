@@ -24,7 +24,6 @@ PANDAENDCOMMENT */
 
 #include <cstdio>
 #include <cstdarg>
-#include <cassert>
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>

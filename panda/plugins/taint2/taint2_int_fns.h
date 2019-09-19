@@ -107,7 +107,7 @@ typedef uint32_t TaintLabel;
 
 // Initializes the labelset label iterator in the query result
 // meaning rewinding it to first label in set
-void taint2_query_result_iter(QueryResult *qr);
+void taint2_query_results_iter(QueryResult *qr);
 
 // Returns current label in set and moves on to next. Sets *bool to
 // true if there are no more labels and false otherwise
@@ -115,19 +115,16 @@ uint32_t taint2_query_result_next(QueryResult *qr, bool *done);
 
 // Places taint query results for this register / offset byte in
 // returned qr.  qr's label set iterator is pre initialized, so there
-// is no need to call taint2_query_result_iter unless you want to
+// is no need to call taint2_query_results_iter unless you want to
 // iterate through labels more than once).
 void taint2_query_reg_full(uint32_t reg_num, uint32_t offset, QueryResult *qr);
 
 
 // Places taint query results for this physical address in
 // returned qr.  qr's label set iterator is pre initialized, so there
-// is no need to call taint2_query_result_iter unless you want to
+// is no need to call taint2_query_results_iter unless you want to
 // iterate through labels more than once).
 void taint2_query_ram_full(uint64_t pa, QueryResult *qr);
-
-// XXX what does this do?
-void taint2_query_results_iter(QueryResult *qr);
 
 // END_PYPANDA_NEEDS_THIS -- do not delete this comment!
 
