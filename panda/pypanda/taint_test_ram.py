@@ -17,7 +17,6 @@ bin_dir = "taint_test"
 bin_name = "taint"
 
 assert(path.isfile(path.join(bin_dir, bin_name))), "Missing file {}".format(path.join(bin_dir, bin_name))
-
 # Take a recording of toy running in the guest if necessary
 recording_name = bin_dir+"_"+bin_name
 if not path.isfile(recording_name +"-rr-snp"):
@@ -98,7 +97,7 @@ def bbe(cpu, tb):
             taint_labels = tq.get_labels()
             assert([0,2,4,6,8,10] == taint_labels), "Taint labels {} are incorrect".format(taint_labels)
             print("Success! Tracked taint propagation and final taint labels match expected (test 2 of 2)!")
-            #panda.end_analysis() # XXX segfaults
+            panda.end_analysis()
     return 0
 
 panda.disable_tb_chaining()

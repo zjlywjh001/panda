@@ -67,7 +67,7 @@ def bbe(env, tb):
             for reg_name, reg in panda_x86_helper.registers.items():
                 if panda.taint_check_reg(reg):
                     print("Taint of register {}".format(reg_name), panda.taint_get_reg(reg))
-            panda.end_analysis() # XXX segfaults
+            panda.end_analysis()
     return 0
 
 panda.disable_tb_chaining()

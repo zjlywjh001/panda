@@ -744,12 +744,12 @@ class Panda:
                 if debug:
                         progress ("Unloading all panda plugins")
 
-                # First unload python plugins
+                # First unload python plugins, should be safe to do anytime
                 for name in self.registered_callbacks.keys():
                         self.disable_callback(name)
 
-                # Then unload C plugins
-                self.libpanda.panda_unload_plugins()
+                # Then unload C plugins. May be unsafe to do except from the top of the main loop (taint segfaults otherwise)
+                self.queue_main_loop_wait_fn(self.libpanda.panda_unload_plugins)
 
         def rr_get_guest_instr_count(self):
                 return self.libpanda.rr_get_guest_instr_count_external()
