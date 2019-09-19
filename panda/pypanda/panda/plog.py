@@ -21,7 +21,6 @@ for dc in itertools.product(top_dirs, build_dirs, arch_dirs):
     searched_paths.append(d)
     if not os.path.isdir(d): continue
     try:
-        print("Loading module plog_bp2 from {}".format(d))
         sys.path.append(d)
         import plog_pb2
         break

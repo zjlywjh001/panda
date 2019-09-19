@@ -18,7 +18,7 @@ from colorama import Fore, Style
 from random import randint
 from inspect import signature
 from tempfile import NamedTemporaryFile
-from taint_query import TaintQuery
+from taint import TaintQuery
 
 from autogen.panda_datatypes import *
 from panda_expect import Expect
@@ -36,7 +36,6 @@ def progress(msg):
 
 # location of panda build dir
 panda_build = realpath(pjoin(abspath(__file__), "../../../build"))
-home = getenv("HOME")
 
 # Decorator to ensure a function isn't called in the main thread
 def blocking(func):
@@ -141,7 +140,7 @@ class Panda:
         else:
             if self.qcow is "default":
                 # this means we'll use arch / mem / os to find a qcow
-                self.qcow = pjoin(home, ".panda", "%s-%s-%s.qcow" % (self.os, self.arch, mem))
+                self.qcow = pjoin(getenv("HOME"), ".panda", "%s-%s-%s.qcow" % (self.os, self.arch, mem))
             if not (exists(self.qcow)):
                 print("Missing qcow -- %s" % self.qcow)
                 print("Please go create that qcow and give it to moyix!")

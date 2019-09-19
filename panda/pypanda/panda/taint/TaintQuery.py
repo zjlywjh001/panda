@@ -1,6 +1,5 @@
 
-# gets us ffi
-from panda_datatypes import *
+from autogen.panda_datatypes import ffi
 
 
 class TaintQuery:
