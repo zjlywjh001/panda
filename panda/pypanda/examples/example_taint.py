@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
-from pypanda import *
-from panda_x86_helper import *
 from sys import argv, stdout
 import os
 from capstone import *
+
+from panda import *
+from panda.x86.helper import *
 
 #md = Cs(CS_ARCH_X86, CS_MODE_64)
 

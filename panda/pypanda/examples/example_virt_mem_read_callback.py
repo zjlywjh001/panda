@@ -40,10 +40,8 @@ string_buffer = ""
 @panda.cb_virt_mem_after_write()
 def virt_mem_after_write(env, pc, addr, size, buf):
     global string_buffer
-    str_buf = ffi.new("char []", size)
-    panda.virtual_memory_read(env, addr, str_buf, size)
     try:
-        py_str = ffi.unpack(str_buf, size).decode("utf-8", "strict")
+        py_str = panda.virtual_memory_read(env, addr, size, fmt='str').decode("utf-8", "strict")
     except UnicodeDecodeError: #
         string_buffer = ""
         return 0

@@ -39,7 +39,7 @@ def fwrite_hook(cpustate, tb):
 	ret = ffi.new("uint32_t[]", 5)
 	size = ffi.cast("target_ptr_t", ffi.sizeof(ret))
 	faddr = ffi.cast("target_ptr_t", cpustate.env_ptr.regs[R_ESP]) # esp
-	panda.virtual_memory_read(cpustate,faddr, ret, size) 
+	panda.virtual_memory_read(cpustate,faddr, ret, size)  # XXX bad argus for virtual_memory_write
 	string_arg = ffi.new("char[]", ret[2]*ret[3])
 	panda.virtual_memory_read(cpustate, ret[1], string_arg, ffi.sizeof(string_arg))
 	string_thing = ffi.string(string_arg).decode(errors='ignore')
