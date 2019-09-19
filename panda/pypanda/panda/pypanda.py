@@ -11,6 +11,7 @@ import shlex # for run_guest
 
 from os.path import join as pjoin
 from os.path import realpath, exists, abspath, isfile
+
 from os import dup, getenv, devnull, environ
 from enum import Enum
 from colorama import Fore, Style
@@ -19,11 +20,11 @@ from inspect import signature
 from tempfile import NamedTemporaryFile
 from taint_query import TaintQuery
 
-from panda_datatypes import *
+from autogen.panda_datatypes import *
 from panda_expect import Expect
 from asyncthread import AsyncThread
 
-import qcows
+import images.qcows
 from plog import PLogReader
 
 import pdb
@@ -36,14 +37,6 @@ def progress(msg):
 # location of panda build dir
 panda_build = realpath(pjoin(abspath(__file__), "../../../build"))
 home = getenv("HOME")
-
-def call_with_opt_arg(f, a):
-        # Helper function to call a function with an argument only when it expects one
-        # To be used for callbacks that may or may not expect a result
-        if len(signature(f).parameters) > 0:
-                f(a)
-        else:
-                f()
 
 # Decorator to ensure a function isn't called in the main thread
 def blocking(func):
@@ -94,15 +87,18 @@ def main_loop_wait_cb():
                 #progress("main_loop_wait_stuff running : " + (str(fnargs)))
                 ret = fn(*args)
                 if cb:
-                        progress("running callback : " + (str(cbargs)))
-                        try:
-                                if len(cb_args): # Must take result when cb_args provided
-                                        cb(ret, *cb_args) # callback(result, cb_arg0, cb_arg1...). Note results may be None
-                                else:
-                                        call_with_opt_arg(cb, ret)
-                        except Exception as e: # Catch it so we can keep going?
-                                print("CALLBACK {} RAISED EXCEPTION: {}".format(cb, e))
-                                raise e
+                    progress("running callback : " + (str(cbargs)))
+                    try:
+                        if len(cb_args): # Must take result when cb_args provided
+                            cb(ret, *cb_args) # callback(result, cb_arg0, cb_arg1...). Note results may be None
+                        else:
+                            if len(signature(cb).parameters) > 0:
+                                    f(ret)
+                            else:
+                                    f()
+                    except Exception as e: # Catch it so we can keep going?
+                            print("CALLBACK {} RAISED EXCEPTION: {}".format(cb, e))
+                            raise e
         main_loop_wait_fnargs = []
         main_loop_wait_cbargs = []
 #        progress("Exiting main_loop_wait_cb")
