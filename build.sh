@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# As part of building we need python2 for qemu and pip3 to install pypanda dependencies
+# Either use python and pip3 or use pyenv with 3.6.6 and 2.7.9
+# This is just a temporary hack until we merge with qemu 4.1 which adds supports python3
+if [ -z "${PYENV_VERSION}" ]; then
+    PYTHON2PATH=$(which python) # Assuming python-> python2
+    PIP3PATH=$(which pip3)
+else
+  eval "$(pyenv init -)"
+  pyenv version
+  pyenv shell 3.6.6 2.7.9
+  PYTHON2PATH=$(pyenv which python2)
+  PIP3PATH=$(pyenv which pip3)
+  echo "BUILDING WITH PYTHON 2 AT $PYTHON2PATH, pip3 at $PIP3PATH"
+fi
+
 # Prefer greadlink over readlink if present. Important for OSX (incompatible readlink).
 if type greadlink >/dev/null 2>&1; then
     READLINK=greadlink
@@ -83,7 +98,7 @@ else
 fi
 
 ### Set other configuration flags, depending on environment.
-MISC_CONFIG="--python=python2 --disable-vhost-net"
+MISC_CONFIG="--python=$PYTHON2PATH --disable-vhost-net"
 if pkg-config --exists --atleast-version 4.9 xencontrol; then
     ## Enable xencontrol compat API for libxen-4.9 (Ubuntu 18.04LTS).
     MISC_CONFIG="$MISC_CONFIG --extra-cflags=-DXC_WANT_COMPAT_DEVICEMODEL_API"
@@ -116,6 +131,6 @@ fi
     "$@"
 make -j ${PANDA_NPROC:-$(nproc || sysctl -n hw.ncpu)}
 
-pip3 install colorama cffi
+$PIP3PATH install colorama cffi
 
 # vim: set et ts=4 sts=4 sw=4 ai ft=sh :
