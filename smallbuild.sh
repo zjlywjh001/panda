@@ -2,13 +2,12 @@
 
 # As part of building we need python2 for qemu and pip3 to install pypanda dependencies
 # Either use python and pip3 or use pyenv with 3.6.6 and 2.7.9
-# This is just a temporary hack until we merge with qemu 4.1 which adds supports python3
+# This is just a temporary hack until we merge with qemu 4.1 which adds supports python3 
 if [ -z "${PYENV_VERSION}" ]; then
     PYTHON2PATH=$(which python) # Assuming python-> python2
     PIP3PATH=$(which pip3)
 else
   eval "$(pyenv init -)"
-  pyenv version
   pyenv shell 3.6.6 2.7.9
   PYTHON2PATH=$(pyenv which python2)
   PIP3PATH=$(pyenv which pip3)
@@ -122,7 +121,7 @@ fi
 
 ## Configure and compile.
 "${PANDA_DIR_REL}/configure" \
-    --target-list=x86_64-softmmu,i386-softmmu,arm-softmmu,ppc-softmmu \
+    --target-list=i386-softmmu \
     --prefix="$(pwd)/install" \
     $COMPILER_CONFIG \
     $LLVM_CONFIG \
