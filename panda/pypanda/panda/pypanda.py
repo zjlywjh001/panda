@@ -51,8 +51,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             extra_args = extra_args.split()
 
         # If specified use a generic (x86_64, i386, arm, ppc) qcow from moyix and ignore
-        # other args. See details in qcows.py
-        if generic:
+        if generic:                                 # other args. See details in qcows.py
             q = qcows.get_qcow_info(generic)
             self.arch     = q.arch
             self.os       = q.os
@@ -61,17 +60,14 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             if q.extra_args:
                 extra_args.extend(q.extra_args.split(" "))
 
-        if self.qcow is None: # this means we wont be using a qcow -- replay only presumably. Probably breaks
-            pass
-        else:
-            if self.qcow is "default": # this means we'll use arch / mem / os to find a qcow - XXX: merge with generic?
+        if self.qcow: # Otherwise we shuld be able to do a replay with no qcow but this is probably broken
+            if self.qcow == "default": # Use arch / mem / os to find a qcow - XXX: merge with generic?
                 self.qcow = pjoin(getenv("HOME"), ".panda", "%s-%s-%s.qcow" % (self.os, self.arch, mem))
             if not (exists(self.qcow)):
-                print("Missing qcow -- %s" % self.qcow)
-                print("Please go create that qcow and give it to moyix!")
+                print("Missing qcow '{}' Please go create that qcow and give it to moyix!".format(self.qcow))
 
         self.bindir = pjoin(panda_build, "%s-softmmu" % self.arch)
-        environ["PANDA_PLUGIN_DIR"] = self.bindir+"/panda/plugins"
+        environ["PANDA_PLUGIN_DIR"] = self.bindir+"/panda/plugins" # Set so libpanda can query, see callbacks.c:215
         self.panda = pjoin(self.bindir, "qemu-system-%s" % self.arch)
 
         self.libpanda_path = pjoin(self.bindir,"libpanda-%s.so" % self.arch)
@@ -80,9 +76,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         self.bits, self.endianness, self.register_size = self._determine_bits()
 
         # Setup argv for panda
-        os_string = "%s-%d-%s" % (self.os, self.bits, self.os) # XXX this is wrong. e.g., "linux[-_]64[-_].+"
-        print("OS STRING:", os_string)
-
         biospath = realpath(pjoin(self.panda,"..", "..",  "pc-bios"))
         self.panda_args = [self.panda, "-m", self.mem, "-display", "none", "-L", biospath,
                             self.qcow] + extra_args
@@ -101,15 +94,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
         self.running = threading.Event()
         self.started = threading.Event()
-        # The "athread" thread manages actions that need to occur outside qemu's CPU loop
-        # e.g., interacting with monitor/serial and waiting for results
-        self.athread = AsyncThread(self.started)
-
-        self.panda_args_ffi = [ffi.new("char[]", bytes(str(i),"utf-8")) for i in self.panda_args]
-        cargs = ffi.new("char **")
-
-        self.len_cargs = ffi.cast("int", len(self.panda_args))
-        self.cenvp = ffi.new("char**", ffi.new("char[]", b""))
+        self.athread = AsyncThread(self.started) # athread manages actions that need to occur outside qemu's CPU loop
 
         # Callbacks
         self.callback = pcb
@@ -119,8 +104,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         # Register asid_changed CB if and only if a callback requires procname
         self._registered_asid_changed_internal_cb = False
 
-        # Simple Variables
-        self.loaded_python = False
         self._initialized_panda = False
         self.disabled_tb_chaining = False
         self.taint_enabled = False
@@ -132,7 +115,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
         # main_loop_wait functions and callbacks
         self.main_loop_wait_fnargs = [] # [(fn, args), ...]
-
         progress ("Panda args: [" + (" ".join(self.panda_args)) + "]")
     # /__init__
 
@@ -143,7 +125,11 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         '''
         self.libpanda.panda_set_library_mode(True)
         self.set_os_name(self.os)
-        self.libpanda.panda_init(self.len_cargs, self.panda_args_ffi, self.cenvp)
+
+        cenvp = ffi.new("char**", ffi.new("char[]", b""))
+        len_cargs = ffi.cast("int", len(self.panda_args))
+        panda_args_ffi = [ffi.new("char[]", bytes(str(i),"utf-8")) for i in self.panda_args]
+        self.libpanda.panda_init(len_cargs, panda_args_ffi, cenvp)
 
         # Now we've run qemu init so we can connect to the sockets for the monitor and serial
         if not self.serial_console.is_connected():
@@ -154,8 +140,10 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             self.monitor_console.connect(self.monitor_socket)
 
         # Register __main_loop_wait_callback
-        self.register_callback(self.callback.main_loop_wait, self.callback.main_loop_wait(self.__main_loop_wait_cb), '__main_loop_wait')
+        self.register_callback(self.callback.main_loop_wait,
+                self.callback.main_loop_wait(self.__main_loop_wait_cb), '__main_loop_wait')
 
+        self._initialized_panda = True
 
     def _determine_bits(self):
         '''
@@ -207,61 +195,54 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
     def exit_cpu_loop(self):
         self.libpanda.panda_break_cpu_loop_req = True
 
-    def revert(self, snapshot_name, now=False, finished_cb=None): # In the next main loop, revert
-        # XXX: now=True might be unsafe. Causes weird 30s hangs sometimes
+    def revert(self, snapshot_name): # In the next main loop, revert
         if debug:
             progress ("Loading snapshot " + snapshot_name)
-        if now:
-            charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
-            self.libpanda.panda_revert(charptr)
-        else:
-            self.vm_stop()
 
-            # queue up revert then continue
+            # Stop guest, queue up revert, then continue
+            self.vm_stop()
             charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
             self.queue_main_loop_wait_fn(self.libpanda.panda_revert, [charptr])
             self.queue_main_loop_wait_fn(self.libpanda.panda_cont)
 
-    def cont(self): # Call after self.stop()
-#        print ("executing panda_start (vm_start)\n");
+    def cont(self): # Continue execution (run after vm_stop)
         self.libpanda.panda_cont()
         self.running.set()
 
-    def vm_stop(self, code=4): # default code of 4 = RUN_STATE_PAUSED
+    def vm_stop(self, code=4): # Stop execution, default code means RUN_STATE_PAUSED
         self.libpanda.panda_stop(code)
 
     def snap(self, snapshot_name):
         if debug:
             progress ("Creating snapshot " + snapshot_name)
-        self.vm_stop()
 
-        # queue up a snapshot, then continue
+        # Stop guest execution, queue up a snapshot, then continue
+        self.vm_stop()
         charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
         self.queue_main_loop_wait_fn(self.libpanda.panda_snap, [charptr])
-        self.queue_main_loop_wait_fn(self.libpanda.panda_cont, [])
+        self.queue_main_loop_wait_fn(self.libpanda.panda_cont)
 
-    def delvm(self, snapshot_name, now):
+    def delvm(self, snapshot_name):
         if debug:
             progress ("Deleting snapshot " + snapshot_name)
-        if now:
-            charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
-            self.libpanda.panda_delvm(charptr)
-        else:
-            self.exit_cpu_loop()
-            charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
-            self.queue_main_loop_wait_fn(self.libpanda.panda_delvm, [charptr])
+
+        # Stop guest, queue up delete, then continue
+        self.vm_stop()
+        charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
+        self.queue_main_loop_wait_fn(self.libpanda.panda_delvm, [charptr])
 
 
     def enable_tb_chaining(self):
         if debug:
             progress("Enabling TB chaining")
+        self.disabled_tb_chaining = False
         self.libpanda.panda_enable_tb_chaining()
 
     def disable_tb_chaining(self):
         if not self.disabled_tb_chaining:
-            self.disabled_tb_chaining = True
             if debug:
                 progress("Disabling TB chaining")
+            self.disabled_tb_chaining = True
             self.libpanda.panda_disable_tb_chaining()
 
     def run(self):
@@ -270,36 +251,28 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
         if not self._initialized_panda:
             self._initialize_panda()
-            self._initialized_panda = True
 
         if not self.started.is_set():
             self.started.set()
 
         self.running.set()
-        self.libpanda.panda_run()
-        self.running.clear()
+        self.libpanda.panda_run() # Give control to panda
+        self.running.clear() # Back from panda's execution (due to shutdown or monitor quit)
 
     def end_analysis(self):
         '''
-        Call from any thread to unload all plugins. If called from async thread, it will also stop execution and unblock panda.run()
+        Call from any thread to unload all plugins. If called from async thread, it will also
+        unblock panda.run()
         '''
         self.unload_plugins()
         if self.running:
             self.queue_async(self.stop_run)
 
-    def finish(self):
-        if debug:
-            progress ("Finishing qemu execution")
-        self.running.clear()
-        self.started.clear()
-        self.libpanda.panda_finish()
-
     def run_replay(self, replaypfx):
         '''
         Load a replay and run it
         '''
-        from os import path as os_path
-        if not os_path.isfile(replaypfx+"-rr-snp") or not os_path.isfile(replaypfx+"-rr-nondet.log"):
+        if not isfile(replaypfx+"-rr-snp") or not isfile(replaypfx+"-rr-nondet.log"):
             raise ValueError("Replay files not present to run replay of {}".format(replaypfx))
         
         if debug:
@@ -311,7 +284,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
     def require(self, name):
         '''
-        Load a C plugin with no arguments
+        Load a C plugin with no arguments. Deprecated. Use load_plugin
         '''
         self.load_plugin(name, args={})
 
@@ -321,7 +294,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         '''
         if debug:
             progress ("Loading plugin %s" % name),
-#            print("plugin args: [" + (" ".join(args)) + "]")
 
         argstrs_ffi = []
         if isinstance(args, dict):
@@ -348,19 +320,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         charptr = pyp.new("char[]", bytes(name,"utf-8"))
         self.libpanda.panda_require_from_library(charptr)
         self.load_plugin_library(name)
-
-    def load_python_plugin(self, init_function, name):
-        if not self.loaded_python: # Only cdef this once
-            ffi.cdef("""
-            extern "Python" bool init(void*);
-            """)
-            self.loaded_python = True
-        init_ffi = init_function
-        name_ffi = ffi.new("char[]", bytes(name, "utf-8"))
-        filename_ffi = ffi.new("char[]", bytes(name, "utf-8"))
-        uid_ffi = ffi.cast("void*",randint(0,0xffffffff)) # XXX: Unlikely but possible for collisions here
-        self.libpanda.panda_load_external_plugin(filename_ffi, name_ffi, uid_ffi, init_ffi)
-
 
     def procname_changed(self, name):
         for cb_name, cb in self.registered_callbacks.items():
@@ -405,10 +364,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         else:
             raise NotImplemented("current_sp doesn't yet support arch {}".format(self.arch))
 
-    def disas(self, fout, code, size):
-        newfd = dup(fout.fileno())
-        return self.libpanda.panda_disas(newfd, code, size)
-
     def virtual_memory_read(self, env, addr, length, fmt='bytearray'):
         '''
         Read but with an autogen'd buffer. Returns a bytearray
@@ -433,6 +388,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
 
     def virtual_memory_write(self, env, addr, buf, length):
+        # XXX: Should update to automatically build buffer
         if not hasattr(self, "_memcb"):
             self.enable_memcb()
         return self.libpanda.panda_virtual_memory_write_external(env, addr, buf, length)

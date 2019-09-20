@@ -12,6 +12,10 @@ class libpanda_mixins():
         os_name_new = ffi.new("char[]", bytes(os_name, "utf-8"))
         self.libpanda.panda_set_os_name(os_name_new)
 
+    def enable_memcb(self):
+        self._memcb = True
+        self.libpanda.panda_enable_memcb()
+
     def virt_to_phys(self, env, addr):
         return self.libpanda.panda_virt_to_phys_external(env, addr)
 
@@ -20,10 +24,6 @@ class libpanda_mixins():
 
     def disable_plugin(self, handle):
         self.libpanda.panda_disable_plugin(handle)
-
-    def enable_memcb(self):
-        self._memcb = True
-        self.libpanda.panda_enable_memcb()
 
     def disable_memcb(self):
         self._memcb = False

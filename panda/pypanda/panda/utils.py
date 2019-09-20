@@ -23,3 +23,6 @@ def make_iso(directory, iso_path):
         else:
             raise NotImplementedError("Unsupported operating system!")
 
+def disasemble(panda, addr, size):
+    raise NotImplementedError()
+

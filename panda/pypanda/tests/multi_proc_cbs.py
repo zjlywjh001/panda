@@ -52,3 +52,4 @@ print("TOY:", hit_toy)
 print("ATA:", hit_ata)
 print("ALL:", hit_always)
 assert (hit_toy and hit_ata and hit_always),  "Callbacks didn't all run"
+print("Success! All three callbacks ran as anticipated")

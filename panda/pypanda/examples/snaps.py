@@ -39,62 +39,56 @@ state = 0 # before snapshot load
 
 @blocking
 def init():
-	global state
-	print("INITIALIZE running")
-	panda.delvm_sync("newroot")
-	panda.revert_sync("root")
-	state = 1
+    global state
+    panda.delvm_sync("newroot")
+    panda.revert_sync("root")
+    state = 1
 
 nt = 0
 blocks = []
 
 @panda.cb_before_block_exec()
 def before_block_exec(env,tb):
-	global nt
-	global state
-	global blocks
-	if state == 0:
-		return 0
+    global nt
+    global state
+    global blocks
+    if state == 0:
+        return 0
 
-	pc = panda.current_pc(env)
-#	print("state = %d pc=%x" % (state,pc))
-	
-	#if (state <= 33):
-	#	print("Before block exec: state=%d, nt=%d pc=%lx" % (state,nt,pc))
+    pc = panda.current_pc(env)
 
-	if (state == 1):
-		assert (pc == 0xc12c4648)
-		state = 2
+    if (state == 1):
+        assert (pc == 0xc12c4648)
+        state = 2
 
-	if (state == 2 and pc == 0xc101dfec):
-		print ("\nCreating 'newroot' snapshot at 0xc101dfec")
-		panda.snap("newroot")
-		state = 3
-		return 1
+    if (state == 2 and pc == 0xc101dfec):
+        print ("\nCreating 'newroot' snapshot at 0xc101dfec")
+        panda.snap("newroot")
+        state = 3
+        return 1
 
-	if state == 3:
-		if len(blocks) <= nt: # First time: capture ordered list of PCs for basic blocks
-		    print(nt,hex( pc))
-		    blocks.append(pc)
-		elif blocks[nt] != pc: # Subsequent execs, fail if we ever diverge from expected
-		    print("Divergence in the {}th block. Expected 0x{:x}, but got 0x{:x}".format(nt, blocks[nt], pc))
-		    panda.queue_async(panda.stop_run)
-		    state = 4
+    if state == 3:
+        if len(blocks) <= nt: # First time: capture ordered list of PCs for basic blocks
+            print(nt,hex( pc))
+            blocks.append(pc)
+        elif blocks[nt] != pc: # Subsequent execs, fail if we ever diverge from expected
+            print("Divergence in the {}th block. Expected 0x{:x}, but got 0x{:x}".format(nt, blocks[nt], pc))
+            panda.end_analysis()
+            state = 4
 
-		nt = nt + 1
+        nt = nt + 1
 
-		if nt == 10:
-			print("Block sequences matches expected value!\nRestoring 'newroot' snapshot")
-			panda.revert("newroot", now=False)
-			nt = 0
-		return 1
+        if nt == 10:
+            print("Block sequences matches expected value!\nRestoring 'newroot' snapshot")
+            panda.revert("newroot")
+            nt = 0
+        return 1
 
-	if state == 4:
-	    pass # While an async command is queued, don't do anything
-			
-	return 0
+    if state == 4:
+        pass # While an async command is queued, don't do anything
+
+    return 0
 
 panda.disable_tb_chaining()
 panda.queue_async(init)
-
 panda.run()
