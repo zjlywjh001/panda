@@ -1,5 +1,8 @@
 # XXX: Do not call any of the following from the main thread- they depend on the CPU loop running
 from .decorators import blocking
+from .utils import progress, make_iso, debug
+from shlex import quote as shlex_quote
+from os import path
 
 class blocking_mixins():
     @blocking
@@ -54,6 +57,8 @@ class blocking_mixins():
 
         make_iso(copy_directory, iso_name)
 
+        copy_directory = path.split(copy_directory)[-1] # Get dirname
+
         # 1) we insert the CD drive
         self.run_monitor_cmd("change ide1-cd0 \"{}\"".format(iso_name))
 
@@ -66,7 +71,7 @@ class blocking_mixins():
         #   prep guest environment before script runs)
         setup_sh = "mkdir -p {mount_dir}; while ! mount /dev/cdrom {mount_dir}; do sleep 0.3; " \
                " umount /dev/cdrom; done; {mount_dir}/setup.sh &> /dev/null || true " \
-               .format(mount_dir = (shlex.quote(copy_directory)))
+               .format(mount_dir = (shlex_quote(copy_directory)))
         progress("setup_sh = [%s] " % setup_sh)
         progress(self.run_serial_cmd(setup_sh))
 

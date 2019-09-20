@@ -10,9 +10,10 @@ additional blocks hit it enables after_block_execute again.
 Run with: python3 example_disable_callbacks.py
 
 '''
-from pypanda import *
 from time import sleep
-from sys import argv
+from sys import argv, path
+path.append("..")
+from panda import Panda, ffi, blocking
 
 # Single arg of arch, defaults to i386
 arch = "i386" if len(argv) <= 1 else argv[1]
@@ -24,7 +25,7 @@ count = 0
 def before_block_execute(cpustate,transblock):
 	global count
 	if count < 9:
-		progress("before block in python %d" %count)
+		print("before block in python %d" %count)
 	if count == 2:
 		panda.disable_callback("after")
 	if count == 4:
@@ -36,7 +37,7 @@ def before_block_execute(cpustate,transblock):
 def after_block_execute(cpustate,transblock):
 	global count
 	if count < 9:
-		progress("after block in python %d" % count)
+		print("after block in python %d" % count)
 	else:
 		panda.end_analysis()
 	return 0

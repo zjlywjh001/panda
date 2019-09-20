@@ -6,8 +6,6 @@ if sys.version_info[0] < 3:
 
 import socket
 import threading
-import subprocess # For make_iso
-import shlex # for run_guest
 
 from os.path import join as pjoin
 from os.path import realpath, exists, abspath, isfile
@@ -17,6 +15,7 @@ from enum import Enum
 from random import randint
 from inspect import signature
 from tempfile import NamedTemporaryFile
+
 from .taint import TaintQuery
 
 from .autogen.panda_datatypes import * # ffi comes from here
@@ -346,6 +345,10 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         '''
         Load a replay and run it
         '''
+        from os import path as os_path
+        if not os_path.isfile(replaypfx+"-rr-snp") or not os_path.isfile(replaypfx+"-rr-nondet.log"):
+            raise ValueError("Replay files not present to run replay of {}".format(replaypfx))
+        
         if debug:
             progress ("Replaying %s" % replaypfx)
 
@@ -353,7 +356,16 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         self.libpanda.panda_replay(charptr)
         self.run()
 
+    def require(self, name):
+        '''
+        Load a C plugin with no arguments
+        '''
+        self.load_plugin(name, args={})
+
     def load_plugin(self, name, args={}):
+        '''
+        Load a C plugin, optionally with arguments
+        '''
         if debug:
             progress ("Loading plugin %s" % name),
 #            print("plugin args: [" + (" ".join(args)) + "]")
@@ -380,8 +392,8 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         panda_name_ffi = ffi.new("char[]", bytes(self.panda,"utf-8"))
         self.libpanda.panda_set_qemu_path(panda_name_ffi)
 
-        name_ffi = ffi.new("char[]", bytes(name,"utf-8"))
-        self.libpanda.panda_init_plugin(name_ffi, argstrs_ffi, n)
+        charptr = pyp.new("char[]", bytes(name,"utf-8"))
+        self.libpanda.panda_require_from_library(charptr)
         self.load_plugin_library(name)
 
     def load_python_plugin(self, init_function, name):
@@ -427,12 +439,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
     def rr_get_guest_instr_count(self):
         return self.libpanda.rr_get_guest_instr_count_external()
-
-    def require(self, plugin):
-        charptr = pyp.new("char[]", bytes(plugin,"utf-8"))
-        self.libpanda.panda_require_from_library(charptr)
-        self.load_plugin_library(plugin)
-
 
     def memsavep(self, file_out):
         newfd = dup(f_out.fileno())

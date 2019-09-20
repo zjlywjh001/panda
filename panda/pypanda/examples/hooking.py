@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
+'''
+Run two commands in a guest and hook two kernel functions with python callbacks
+Requires kernel symbol->address mappings which is generated with util/generate_kallsyms.py
+'''
 
-from pypanda import *
-from sys import argv
+from sys import argv,  path
+path.append("..")
+from panda import Panda
 import time
 import pickle
 
@@ -12,7 +17,7 @@ import pickle
 arch = "i386" if len(argv) <= 1 else argv[1]
 panda = Panda(generic=arch)
 
-# Generate with example_generate_kallsyms.py
+# Generate with utils/example_generate_kallsyms.py
 with open("i386_syms.pickle", "rb") as f:
     kallsyms = pickle.load(f)
 
@@ -22,10 +27,7 @@ def my_runcmd():
     panda.revert_sync('root')
     panda.run_serial_cmd("cat /proc/self/environ")
     panda.run_serial_cmd("wget http://google.com")
-
-    # By quitting here main thread can continue executing after panda.run
-    # XXX: Need a better way to transfer control back to main thread - maybe via main_loop_wait callbacks?
-    panda.run_monitor_cmd("quit")
+    panda.stop_run()
 
 panda.queue_async(my_runcmd)
 

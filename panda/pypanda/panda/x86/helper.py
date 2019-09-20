@@ -39,13 +39,16 @@ def telescope(panda, cpu, val):
     for _ in range(5): # Max chain of 5
         potential_ptr =  panda.virt_to_phys(cpu, val)
         if potential_ptr == 0xffffffff:
-            print("")
+            print()
             return
         else:
             print("-> 0x{:0>8x}".format(val), end="\t")
 
+            if val == 0:
+                print()
+                return
             # Consider that val points to a string. Test and print
-            str_data = panda.virtual_memory_read2(cpu, val, 16)
+            str_data = panda.virtual_memory_read(cpu, val, 16)
             str_val = ""
             for d in str_data:
                 if d >= 0x20 and d < 0x7F:
@@ -73,7 +76,7 @@ def dump_regs(panda, cpu):
     print("{}: 0x{:x}".format("EIP", cpu.env_ptr.eip))
     print("{}: 0x{:x}".format("EFLAGS", cpu.env_ptr.eflags))
 
-def dump_stack(panda, cpu, ebp=False):
+def dump_stack(panda, cpu):
     '''
     Print (telescoping) most recent 8 words on the stack (from ESP ESP+8*word_size)
     '''
@@ -85,7 +88,7 @@ def dump_stack(panda, cpu, ebp=False):
 
     base_reg_val = cpu.env_ptr.regs[base_reg]
     for word_idx in range(N_WORDS):
-        val_b = panda.virtual_memory_read2(cpu, base_reg_val+word_idx*word_size, word_size)
+        val_b = panda.virtual_memory_read(cpu, base_reg_val+word_idx*word_size, word_size)
         val = int.from_bytes(val_b, byteorder='little')
         print("[{}+0x{:0>2x} == 0x{:0<8x}]: 0x{:0<8x}".format(base_reg_s, word_idx*word_size, base_reg_val+word_idx*word_size, val), end="\t")
         telescope(panda, cpu, val)

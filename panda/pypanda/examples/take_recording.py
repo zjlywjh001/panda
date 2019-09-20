@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 
-from pypanda import *
-from sys import argv
-import subprocess
-import os
-import shlex
-import threading
-
+from sys import argv, path
+path.append("..")
+from panda import Panda, blocking
 
 # Record some programs running in the guest
 # for some programs, register python callbacks
@@ -27,7 +23,7 @@ def bbe(env, tb):
 # Run ls with c plugin loaded
 @blocking
 def record_ls():
-    progress("Recording run of `ls` with C callback")
+    print("Recording run of `ls` with C callback")
 
     # Load c plugin
     panda.require("coverage")
@@ -38,8 +34,8 @@ def record_ls():
 # Run whoami with python plugin
 @blocking
 def record_whoami():
-    progress("Recording run of `whoami` with python callback")
-    panda.enable_callback_by_name("bbe")
+    print("Recording run of `whoami` with python callback")
+    panda.enable_callback("bbe")
 
     panda.record_cmd("whoami", recording_name="whoami")
 

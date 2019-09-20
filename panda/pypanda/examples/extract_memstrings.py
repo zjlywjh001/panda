@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-'''
-example_virt_mem_read_callback.py
 
-This plugin registers the virt_mem_after_write callback and attempts to find
-strings in the buffers.
+# This plugin registers the virt_mem_after_write callback and attempts to find strings in memory buffers.
 
-Run with: python3 example_virt_mem_read_callback.py
-'''
-from pypanda import Panda, ffi, blocking
-from time import sleep
-from sys import argv
+from sys import argv, path as syspath
 from string import ascii_letters
 from os import remove, path
+syspath.append("..")
+from panda import Panda, ffi, blocking
 
 # Single arg of arch, defaults to i386
 arch = "i386" if len(argv) <= 1 else argv[1]
@@ -26,7 +21,6 @@ for f in [recording_name+"-rr-nondet.log", recording_name+"-rr-snp"]:
 def my_record_cmd(): # Run a non-deterministic command at the root snapshot, then end .run()
     panda.record_cmd("wget google.com", recording_name=recording_name)
     panda.stop_run()
-
 
 print("Take recording...")
 panda.queue_async(my_record_cmd)

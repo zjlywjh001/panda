@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # Take a recording, then replay and analyze
-from pypanda import Panda, blocking
 from os import remove, path
+from sys import path as syspath
+syspath.append("..")
+from panda import Panda, blocking
+
 
 arch = "i386"
 panda = Panda(generic=arch)
@@ -32,7 +35,7 @@ def before_block_exec(env, tb):
     return 0
 
 print("======== TAKE RECORDING ========")
-print("Please wait ~15 seconds for the guest to execute our commands\n")
+print("\n!!!!!! Please wait ~15 seconds for the guest to execute our commands !!!!!\n")
 panda.queue_async(record_nondet) # Take a recording
 panda.run()
 print("======== END RECORDING ========")
@@ -66,3 +69,6 @@ print("======= RUN AGAIN ======")
 panda.queue_async(second_cmd)
 panda.run()
 print("======= DONE =========")
+
+for f in [recording_name+"-rr-nondet.log", recording_name+"-rr-snp"]:
+    if path.isfile(f): remove(f)

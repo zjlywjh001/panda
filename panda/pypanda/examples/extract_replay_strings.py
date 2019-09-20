@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-from pypanda import *
 from time import sleep
-from sys import argv
+from sys import argv, path
 from string import printable
+path.append("..")
+from panda import Panda
+
+# Pull strings from wget out of a replay (named specified by arg 2)
 
 # Single arg of arch, defaults to i386
 arch = "i386" if len(argv) <= 1 else argv[1]

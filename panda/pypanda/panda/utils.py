@@ -1,6 +1,10 @@
-from colorama import Fore, Style
 import sys
+import subprocess
+import shlex
+from os import devnull
+from colorama import Fore, Style
 
+# This debug variable
 debug = True
 
 def progress(msg):

@@ -1,2 +1,4 @@
 *.o
 .*.sw*
+taint
+taint_asm

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from pypanda import Panda, blocking, ffi
+from panda import Panda, blocking, ffi
 from taint_query import TaintQuery
 import panda_x86_helper
 from sys import argv

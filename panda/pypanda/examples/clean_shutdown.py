@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# Example script to stop an analysis as cleanly as we can
+# Example script to stop an analysis after 100 blocks
 
-from pypanda import Panda
-from sys import argv
+from sys import argv, path
+path.append("..")
+from panda import Panda
 
 # Single arg of arch, defaults to i386
 arch = "i386" if len(argv) <= 1 else argv[1]
@@ -27,5 +28,6 @@ def before_block_execute(cpustate, transblock):
 
     block_count += 1
     return 0
+
 panda.run()
 print("Finished")  # Note this won't run until after end_analysis
