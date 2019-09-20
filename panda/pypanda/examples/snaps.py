@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-from pypanda import *
 import os
-from sys import argv,exit
+from sys import argv,exit, path
+path.append("..")
+from panda import Panda, blocking
 
 #
 # snaps.py
@@ -59,14 +60,14 @@ def before_block_exec(env,tb):
 #	print("state = %d pc=%x" % (state,pc))
 	
 	#if (state <= 33):
-	#	progress("Before block exec: state=%d, nt=%d pc=%lx" % (state,nt,pc))
+	#	print("Before block exec: state=%d, nt=%d pc=%lx" % (state,nt,pc))
 
 	if (state == 1):
 		assert (pc == 0xc12c4648)
 		state = 2
 
 	if (state == 2 and pc == 0xc101dfec):
-		progress ("\nCreating 'newroot' snapshot at 0xc101dfec")
+		print ("\nCreating 'newroot' snapshot at 0xc101dfec")
 		panda.snap("newroot")
 		state = 3
 		return 1
@@ -83,7 +84,7 @@ def before_block_exec(env,tb):
 		nt = nt + 1
 
 		if nt == 10:
-			progress("Block sequences matches expected value!\nRestoring 'newroot' snapshot")
+			print("Block sequences matches expected value!\nRestoring 'newroot' snapshot")
 			panda.revert("newroot", now=False)
 			nt = 0
 		return 1

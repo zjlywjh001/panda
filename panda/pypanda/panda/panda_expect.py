@@ -9,19 +9,14 @@ from datetime import datetime
 from errno import EAGAIN, EWOULDBLOCK
 from colorama import Fore, Style
 
-def progress(msg):
-	print(Fore.BLUE + '[panda_expect.py] ' + Fore.RESET + Style.BRIGHT + msg +Style.RESET_ALL)
-
 class TimeoutExpired(Exception): pass
 
 class Expect(object):
-    def __init__(self, filelike, expectation=None, logfile=None, quiet=False, consume_first=False):
-        if type(filelike) == int:
-            self.fd = filelike
+    def __init__(self, filelike=None, expectation=None, logfile=None, quiet=False, consume_first=False):
+        if filelike is None: # Must later use connect(filelike)
+            self.fd = None
         else:
-            self.fd = filelike.fileno()
-        self.poller = select.poll()
-        self.poller.register(self.fd, select.POLLIN)
+            connect(filelike)
 
         if logfile is None: logfile = os.devnull
         self.logfile = open(logfile, "wb")
@@ -36,6 +31,17 @@ class Expect(object):
         self.consumed_first = True
         if consume_first:
             self.consumed_first = False
+
+    def connect(self, filelike):
+        if type(filelike) == int:
+            self.fd = filelike
+        else:
+            self.fd = filelike.fileno()
+        self.poller = select.poll()
+        self.poller.register(self.fd, select.POLLIN)
+
+    def is_connected(self):
+        return self.fd != None
 
     def __del__(self):
         self.logfile.close()
@@ -75,7 +81,7 @@ class Expect(object):
                     if b"\x1b" in sofar: # Socket is echoing back when we type, try to trim it
                         sofar = sofar.split(b"\x1b")[-1][2:]
 
-                    #progress("\nRaw message '{}'".format(sofar))
+                    #print("\nRaw message '{}'".format(sofar))
 
                     if b"\r\n" in sofar: # Serial will echo our command back, try to strip it out
                         resp = sofar.split(b"\r\n")

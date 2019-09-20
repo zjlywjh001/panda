@@ -39,7 +39,7 @@ class blocking_mixins():
     @blocking
     def run_monitor_cmd(self, cmd):
         self.monitor_console.sendline(cmd.encode("utf8"))
-        result = self.monitor_console.expect(self.monitor_prompt)
+        result = self.monitor_console.expect()
         return result
 
     @blocking

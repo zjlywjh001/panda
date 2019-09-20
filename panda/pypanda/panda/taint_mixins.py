@@ -1,3 +1,7 @@
+from .utils import progress, debug
+from .autogen.panda_datatypes import ffi
+from .taint import TaintQuery
+
 class taint_mixins():
     def taint_enable(self, cont=True):
         if not self.taint_enabled:

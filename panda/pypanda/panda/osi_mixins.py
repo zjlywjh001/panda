@@ -4,11 +4,11 @@ from .autogen.panda_datatypes import ffi
 class osi_mixins():
     def load_osi(self):
         progress("load_osi")
-        self.require("osi")
-        if "linux" in self.os_string:
-            self.require("osi_linux")
+        self.load_plugin("osi")
+        if "linux" in self.os:
+            self.load_plugin("osi_linux")
         else:
-            print("Not supported yet for os: %s" % self.os_string)
+            print("Not supported yet for os: %s" % self.os)
 
     def get_current_process(self, cpustate):
         if not hasattr(self, "libpanda_osi"):

@@ -1,1 +1,1 @@
-__all__ = ["TaintQuery"]
+from .TaintQuery import TaintQuery

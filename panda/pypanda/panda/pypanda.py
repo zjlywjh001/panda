@@ -11,14 +11,13 @@ from os.path import join as pjoin
 from os.path import realpath, exists, abspath, isfile
 
 from os import dup, getenv, devnull, environ
-from enum import Enum
 from random import randint
 from inspect import signature
 from tempfile import NamedTemporaryFile
 
 from .taint import TaintQuery
 
-from .autogen.panda_datatypes import * # ffi comes from here
+from .autogen.panda_datatypes import * # ffi, pcb come from here
 from .panda_expect import Expect
 from .asyncthread import AsyncThread
 from .images import qcows
@@ -38,63 +37,18 @@ import pdb
 # location of panda build dir
 panda_build = realpath(pjoin(abspath(__file__), "../../../../build"))
 
-
-# XXX REFACTOR MAIN LOOP WAIT STUFF
-
-# main_loop_wait_cb is called at the start of the main cpu loop in qemu.
-# This is a fairly safe place to call into qemu internals but watch out for deadlocks caused
-# by your request blocking on the guest's execution
-
-# Functions+args to call when we're next at the main loop. Callbacks to call when they're done
-main_loop_wait_fnargs = []
-main_loop_wait_cbargs = []
-
-
-# At the start of the main cpu loop: run async_callbacks and main_loop_wait_fns
-@pcb.main_loop_wait
-def main_loop_wait_cb():
-    # Then run any and all requested commands
-    global main_loop_wait_fnargs
-    global main_loop_wait_cbargs
-    if len(main_loop_wait_fnargs) == 0: return
-#    progress("Entering main_loop_wait_cb")
-    for fnargs, cbargs in zip(main_loop_wait_fnargs, main_loop_wait_cbargs):
-        (fn, args) = fnargs
-        (cb, cb_args) = cbargs
-        fnargs = (fn, args)
-        #progress("main_loop_wait_stuff running : " + (str(fnargs)))
-        ret = fn(*args)
-        if cb:
-            progress("running callback : " + (str(cbargs)))
-            try:
-                if len(cb_args): # Must take result when cb_args provided
-                    cb(ret, *cb_args) # callback(result, cb_arg0, cb_arg1...). Note results may be None
-                else:
-                    if len(signature(cb).parameters) > 0:
-                        f(ret)
-                    else:
-                        f()
-            except Exception as e: # Catch it so we can keep going?
-                print("CALLBACK {} RAISED EXCEPTION: {}".format(cb, e))
-                raise e
-    main_loop_wait_fnargs = []
-    main_loop_wait_cbargs = []
-
-
 class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callback_mixins, taint_mixins):
     def __init__(self, arch="i386", mem="128M",
-            expect_prompt = None, os_version="debian:3.2.0-4-686-pae",
-            qcow="default", extra_args = "", os="linux", generic=None):
+            expect_prompt=None, os_version="debian:3.2.0-4-686-pae",
+            qcow="default", extra_args=[], os="linux", generic=None):
+
         self.arch = arch
         self.mem = mem
         self.os = os_version
-        self.static_var = 0
         self.qcow = qcow
 
-        if extra_args:
+        if isinstance(extra_args, str): # Extra args can be a string or array
             extra_args = extra_args.split()
-        else:
-            extra_args = []
 
         # If specified use a generic (x86_64, i386, arm, ppc) qcow from moyix and ignore
         # other args. See details in qcows.py
@@ -107,17 +61,14 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             if q.extra_args:
                 extra_args.extend(q.extra_args.split(" "))
 
-        if self.qcow is None:
-            # this means we wont be using a qcow -- replay only presumably
+        if self.qcow is None: # this means we wont be using a qcow -- replay only presumably. Probably breaks
             pass
         else:
-            if self.qcow is "default":
-                # this means we'll use arch / mem / os to find a qcow
+            if self.qcow is "default": # this means we'll use arch / mem / os to find a qcow - XXX: merge with generic?
                 self.qcow = pjoin(getenv("HOME"), ".panda", "%s-%s-%s.qcow" % (self.os, self.arch, mem))
             if not (exists(self.qcow)):
                 print("Missing qcow -- %s" % self.qcow)
                 print("Please go create that qcow and give it to moyix!")
-
 
         self.bindir = pjoin(panda_build, "%s-softmmu" % self.arch)
         environ["PANDA_PLUGIN_DIR"] = self.bindir+"/panda/plugins"
@@ -126,12 +77,90 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         self.libpanda_path = pjoin(self.bindir,"libpanda-%s.so" % self.arch)
         self.libpanda = ffi.dlopen(self.libpanda_path)
 
-        self.loaded_python = False
+        self.bits, self.endianness, self.register_size = self._determine_bits()
 
-        if self.os:
-            self.set_os_name(self.os)
+        # Setup argv for panda
+        os_string = "%s-%d-%s" % (self.os, self.bits, self.os) # XXX this is wrong. e.g., "linux[-_]64[-_].+"
+        print("OS STRING:", os_string)
 
         biospath = realpath(pjoin(self.panda,"..", "..",  "pc-bios"))
+        self.panda_args = [self.panda, "-m", self.mem, "-display", "none", "-L", biospath,
+                            self.qcow] + extra_args
+
+        # Configure serial - Always enabled for now
+        self.serial_file = NamedTemporaryFile(prefix="pypanda_s").name
+        self.serial_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.serial_console = Expect(expectation=expect_prompt, quiet=True, consume_first=False)
+        self.panda_args.extend(['-serial', 'unix:{},server,nowait'.format(self.serial_file)])
+
+        # Configure monitor - Always enabled for now
+        self.monitor_file = NamedTemporaryFile(prefix="pypanda_m").name
+        self.monitor_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.monitor_console = Expect(expectation="(qemu)", quiet=True, consume_first=True)
+        self.panda_args.extend(['-monitor', 'unix:{},server,nowait'.format(self.monitor_file)])
+
+        self.running = threading.Event()
+        self.started = threading.Event()
+        # The "athread" thread manages actions that need to occur outside qemu's CPU loop
+        # e.g., interacting with monitor/serial and waiting for results
+        self.athread = AsyncThread(self.started)
+
+        self.panda_args_ffi = [ffi.new("char[]", bytes(str(i),"utf-8")) for i in self.panda_args]
+        cargs = ffi.new("char **")
+
+        self.len_cargs = ffi.cast("int", len(self.panda_args))
+        self.cenvp = ffi.new("char**", ffi.new("char[]", b""))
+
+        # Callbacks
+        self.callback = pcb
+        self.register_cb_decorators()
+        self.registered_callbacks = {} # name -> {procname: "bash", enabled: False, callback: None}
+
+        # Register asid_changed CB if and only if a callback requires procname
+        self._registered_asid_changed_internal_cb = False
+
+        # Simple Variables
+        self.loaded_python = False
+        self._initialized_panda = False
+        self.disabled_tb_chaining = False
+        self.taint_enabled = False
+        self.hook_list = []
+
+        # Asid stuff
+        self.current_asid_name = None
+        self.asid_mapping = {}
+
+        # main_loop_wait functions and callbacks
+        self.main_loop_wait_fnargs = [] # [(fn, args), ...]
+
+        progress ("Panda args: [" + (" ".join(self.panda_args)) + "]")
+    # /__init__
+
+    def _initialize_panda(self):
+        '''
+        After initializing the class, the user has a chance to do something
+        (TODO: what? register callbacks? It's something important...) before we finish initializing
+        '''
+        self.libpanda.panda_set_library_mode(True)
+        self.set_os_name(self.os)
+        self.libpanda.panda_init(self.len_cargs, self.panda_args_ffi, self.cenvp)
+
+        # Now we've run qemu init so we can connect to the sockets for the monitor and serial
+        if not self.serial_console.is_connected():
+            self.serial_socket.connect(self.serial_file)
+            self.serial_console.connect(self.serial_socket)
+        if not self.monitor_console.is_connected():
+            self.monitor_socket.connect(self.monitor_file)
+            self.monitor_console.connect(self.monitor_socket)
+
+        # Register __main_loop_wait_callback
+        self.register_callback(self.callback.main_loop_wait, self.callback.main_loop_wait(self.__main_loop_wait_cb), '__main_loop_wait')
+
+
+    def _determine_bits(self):
+        '''
+        Given self.arch, determine bits, endianness and register_size
+        '''
         bits = None
         endianness = None # String 'little' or 'big'
         if self.arch == "i386":
@@ -149,101 +178,31 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
         assert (bits is not None), "For arch %s: I need logic to figure out num bits" % self.arch
         assert (endianness is not None), "For arch %s: I need logic to figure out endianness" % self.arch
+        register_size = int(bits/8)
 
-        # set os string in line with osi plugin requirements e.g. "linux[-_]64[-_].+"
-        self.os_string = "%s-%d-%s" % (os,bits,os_version)
-        self.bits = bits
-        self.endianness = endianness
-        self.register_size = int(bits / 8)
+        return bits, endianness, register_size
 
-        # note: weird that we need panda as 1st arg to lib fn to init?
-        self.panda_args = [self.panda, "-m", self.mem, "-display", "none", "-L", biospath, "-os", self.os_string, self.qcow]
-        self.panda_args.extend(extra_args)
-
-        # The "athread" thread manages actions that need to occur outside qemu's CPU loop
-        # e.g., interacting with monitor/serial and waiting for results
-
-        # Configure serial - Always enabled for now
-        self.serial_prompt = expect_prompt
-        self.serial_console = None
-        self.serial_file = NamedTemporaryFile(prefix="pypanda_s").name
-        self.serial_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.panda_args.extend(['-serial', 'unix:{},server,nowait'.format(self.serial_file)])
-
-        # Configure monitor - Always enabled for now
-        self.monitor_prompt = "(qemu)"
-        self.monitor_console = None
-        self.monitor_file = NamedTemporaryFile(prefix="pypanda_m").name
-        self.monitor_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.panda_args.extend(['-monitor', 'unix:{},server,nowait'.format(self.monitor_file)])
-
-        self.running = threading.Event()
-        self.started = threading.Event()
-        self.athread = AsyncThread(self.started)
-
-        self.panda_args_ffi = [ffi.new("char[]", bytes(str(i),"utf-8")) for i in self.panda_args]
-        cargs = ffi.new("char **")
-
-        nulls = ffi.new("char[]", b"")
-        cenvp = ffi.new("char **",nulls)
-        len_cargs = ffi.cast("int", len(self.panda_args))
-
-        progress ("Panda args: [" + (" ".join(self.panda_args)) + "]")
-
-        self.len_cargs = len_cargs
-        self.cenvp = cenvp
-        self.taint_enabled = False
-        self.hook_list = []
-
-        self.current_asid_name = None
-        self.asid_mapping = {}
-
-        self.callback = pcb
-        self.register_cb_decorators()
-
-        self.registered_callbacks = {} # name -> {procname: "bash", enabled: False, callback: None}
-
-        self.handle = ffi.cast('void *', 0xdeadbeef)
-        self._initialized_panda = False
-        self.disabled_tb_chaining = False
-
-        # Register asid_changed CB if and only if a callback requires procname
-        self._registered_asid_changed_internal_cb = False
-    # /__init__
-
-    def _initialize_panda(self):
+    def __main_loop_wait_cb(self):
         '''
-        After initializing the class, the user has a chance to do something (TODO: what? register callbacks?) before we finish initializing
+        __main_loop_wait_cb is called at the start of the main cpu loop in qemu.
+        This is a fairly safe place to call into qemu internals but watch out for deadlocks caused
+        by your request blocking on the guest's execution. Here any functions in main_loop_wait_fnargs will be called
         '''
-        self.libpanda.panda_set_library_mode(True)
-        self.libpanda.panda_init(self.len_cargs, self.panda_args_ffi, self.cenvp)
-
-        # Connect to serial socket and setup serial_console if necessary
-        if not self.serial_console:
-            self.serial_socket.connect(self.serial_file)
-            self.serial_console = Expect(self.serial_socket, expectation=self.serial_prompt, quiet=True,
-                                        consume_first=False)
-
-        # Connect to monitor socket and setup monitor_console if necessary
-        if not self.monitor_console:
-            self.monitor_socket.connect(self.monitor_file)
-            self.monitor_console = Expect(self.monitor_socket, expectation=self.monitor_prompt, quiet=True,
-                                        consume_first=True)
-        # Register main_loop_wait_callback
-        self.register_callback(self.callback.main_loop_wait, main_loop_wait_cb, 'main_loop_wait') # XXX WIP
-    # /__init__
+        # Then run any and all requested commands
+        if len(self.main_loop_wait_fnargs) == 0: return
+        #progress("Entering main_loop_wait_cb")
+        for fnargs in self.main_loop_wait_fnargs:
+            (fn, args) = fnargs
+            ret = fn(*args)
+        self.main_loop_wait_fnargs = []
 
 
-
-    # fnargs is a pair (fn, args)
-    # fn is a function we want to run
-    # args is args (an array)
-    def queue_main_loop_wait_fn(self, fn, args=[], callback=None, cb_args=[]):
-        #progress("queued up a fnargs")
-        fnargs = (fn, args)
-        main_loop_wait_fnargs.append(fnargs)
-        cbargs = (callback, cb_args)
-        main_loop_wait_cbargs.append(cbargs)
+    def queue_main_loop_wait_fn(self, fn, args=[]):
+        '''
+        Queue a function to run at the next main loop
+        fn is a function we want to run, args are arguments to apss to it
+        '''
+        self.main_loop_wait_fnargs.append((fn, args))
 
     def exit_cpu_loop(self):
         self.libpanda.panda_break_cpu_loop_req = True
@@ -261,9 +220,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             # queue up revert then continue
             charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
             self.queue_main_loop_wait_fn(self.libpanda.panda_revert, [charptr])
-            # if specified, finished_cb will run after we revert and have started to continue
-            # but before guest has a chance to execute anything
-            self.queue_main_loop_wait_fn(self.libpanda.panda_cont, [], callback=finished_cb)
+            self.queue_main_loop_wait_fn(self.libpanda.panda_cont)
 
     def cont(self): # Call after self.stop()
 #        print ("executing panda_start (vm_start)\n");
@@ -273,19 +230,15 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
     def vm_stop(self, code=4): # default code of 4 = RUN_STATE_PAUSED
         self.libpanda.panda_stop(code)
 
-    def snap(self, snapshot_name, cont=True):
-
+    def snap(self, snapshot_name):
         if debug:
             progress ("Creating snapshot " + snapshot_name)
         self.vm_stop()
 
-        # queue up snapshot for when monitor gets a turn
+        # queue up a snapshot, then continue
         charptr = ffi.new("char[]", bytes(snapshot_name, "utf-8"))
         self.queue_main_loop_wait_fn(self.libpanda.panda_snap, [charptr])
-        # and right after that we will do a vm_start
-        if cont:
-            self.queue_main_loop_wait_fn(self.libpanda.panda_cont, []) # so this 
-
+        self.queue_main_loop_wait_fn(self.libpanda.panda_cont, [])
 
     def delvm(self, snapshot_name, now):
         if debug:
@@ -456,10 +409,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         newfd = dup(fout.fileno())
         return self.libpanda.panda_disas(newfd, code, size)
 
-    def set_os_name(self, os_name):
-        os_name_new = ffi.new("char[]", bytes(os_name, "utf-8"))
-        self.libpanda.panda_set_os_name(os_name_new)
-
     def virtual_memory_read(self, env, addr, length, fmt='bytearray'):
         '''
         Read but with an autogen'd buffer. Returns a bytearray
@@ -488,12 +437,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             self.enable_memcb()
         return self.libpanda.panda_virtual_memory_write_external(env, addr, buf, length)
 
-    def virt_to_phys(self, env, addr):
-        return self.libpanda.panda_virt_to_phys_external(env, addr)
-
-
-# uint32_t get_callers(target_ulong *callers, uint32_t n, CPUState *cpu);
-
     def callstack_callers(self, lim, cpu):
         if not hasattr(self, "libpanda_callstack_instr"):
             progress("enabling callstack_instr plugin")
@@ -506,31 +449,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             c.append(pc)
         return c
 
-
-    def send_monitor_async(self, cmd, finished_cb=None, finished_cb_args=[]):
-        if debug:
-            progress ("Sending monitor command async: %s" % cmd),
-
-        buf = ffi.new("char[]", bytes(cmd,"UTF-8"))
-        n = len(cmd)
-
-        self.queue_main_loop_wait_fn(self.libpanda.panda_monitor_run,
-                [buf], self.monitor_command_cb, [finished_cb, finished_cb_args])
-
-    def monitor_command_cb(self, result, finished_cb=None, finished_cb_args=[]):
-        if result == ffi.NULL:
-            r = None
-        else:
-            r = ffi.string(result).decode("utf-8", "ignore")
-        if finished_cb:
-            if len(finished_cb_args):
-                finished_cb(r, *finished_cb_args)
-            else:
-                finished_cb(r)
-        elif debug and r:
-            print("(Debug) Monitor command result: {}".format(r))
-
-
     def load_plugin_library(self, name):
         if hasattr(self,"__did_load_libpanda"):
             libpanda_path_chr = ffi.new("char[]",bytes(self.libpanda_path,"UTF-8"))
@@ -540,9 +458,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             assert(isfile(pjoin(self.bindir, "panda/plugins/panda_%s.so"% name)))
             library = ffi.dlopen(pjoin(self.bindir, "panda/plugins/panda_%s.so"% name))
             self.__setattr__(libname, library)
-
-    def ppp_reg_cb(self):
-        pass
 
     def get_cpu(self,cpustate):
         if self.arch == "arm":

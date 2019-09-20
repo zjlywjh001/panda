@@ -1,5 +1,4 @@
-
-from ..autogen import panda_datatypes
+from ..autogen.panda_datatypes import ffi
 
 
 class TaintQuery:

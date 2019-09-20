@@ -8,6 +8,13 @@ class libpanda_mixins():
         charptr = ffi.new("char[]", bytes(name, "utf-8"))
         self.libpanda.panda_start_pandalog(charptr)
 
+    def set_os_name(self, os_name):
+        os_name_new = ffi.new("char[]", bytes(os_name, "utf-8"))
+        self.libpanda.panda_set_os_name(os_name_new)
+
+    def virt_to_phys(self, env, addr):
+        return self.libpanda.panda_virt_to_phys_external(env, addr)
+
     def enable_plugin(self, handle):
         self.libpanda.panda_enable_plugin(handle)
 

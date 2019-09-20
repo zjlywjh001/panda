@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-from panda import Panda, blocking, ffi
-from taint_query import TaintQuery
-import panda_x86_helper
-from sys import argv
+
+from sys import argv, path as syspath
 from os import path
 import capstone
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
+
+syspath.append("..")
+from panda import Panda, blocking, ffi
+from panda.x86.helper import *
 
 # Single arg of arch, defaults to i386
 arch = "i386" if len(argv) <= 1 else argv[1]
 panda = Panda(generic=arch)
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 
-bin_dir = "taint_test"
+bin_dir = "taint"
 bin_name = "taint"
 
 assert(path.isfile(path.join(bin_dir, bin_name))), "Missing file {}".format(path.join(bin_dir, bin_name))
@@ -51,11 +53,11 @@ def taint_it(cpu, tb):
         if not tainted:
             # Apply taint to the string that begins at *(ESP+4)
             tainted = True
-            string_base_p = cpu.env_ptr.regs[panda_x86_helper.R_ESP] + 0x4 # esp + 0x4
+            string_base_p = cpu.env_ptr.regs[R_ESP] + 0x4 # esp + 0x4
 
-            str_base = panda.virtual_memory_read2(cpu, string_base_p, 4, fmt='int') # *(esp+0x4)
+            str_base = panda.virtual_memory_read(cpu, string_base_p, 4, fmt='int') # *(esp+0x4)
 
-            s = panda.virtual_memory_read2(cpu, str_base, 16, fmt='str').decode('utf8')
+            s = panda.virtual_memory_read(cpu, str_base, 16, fmt='str').decode('utf8')
             print("Tainting string '{}'".format(s))
 
             global g_phys_addrs # Save all our tainted addresses for abe() check
@@ -90,7 +92,7 @@ def bbe(cpu, tb):
             assert(tainted), "Can't query taint before tainting"
 
             # EAX contains our result variable which should be tainted
-            virt_addr = cpu.env_ptr.regs[panda_x86_helper.R_EAX]
+            virt_addr = cpu.env_ptr.regs[R_EAX]
             phys_addr = panda.virt_to_phys(cpu, virt_addr)
             assert(panda.taint_check_ram(phys_addr)), "Final result is not tainted"
             tq = panda.taint_get_ram(phys_addr)

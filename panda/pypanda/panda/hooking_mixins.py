@@ -50,15 +50,12 @@ class hooking_mixins():
         if procname:
             self._register_internal_asid_changed_cb()
         def decorator(fun):
-            assert(self.handle is not None)
-
             # Ultimately, our hook resolves as a before_block_exec_invalidate_opt callback so we must match its args
             hook_cb_type = self.callback.before_block_exec_invalidate_opt # (CPUState, TranslationBlock)
 
             if not hasattr(self, 'libpanda_hooks'):
                 # Enable hooks plugin on first request
-                #self.load_plugin("hooks")
-                self.require("hooks")
+                self.load_plugin("hooks")
 
             if debug:
                 print("Registering breakpoint at 0x{:x} -> {} == {}".format(addr, fun, 'cdata_cb'))
