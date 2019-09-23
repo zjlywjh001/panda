@@ -1,4 +1,5 @@
-from .autogen.panda_datatypes import ffi
+from .autogen.panda_datatypes import ffi, Hook
+from .utils import debug
 
 class hooking_mixins():
     def update_hook(self,hook,addr):

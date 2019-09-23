@@ -39,8 +39,8 @@ panda_build = realpath(pjoin(abspath(__file__), "../../../../build"))
 
 class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callback_mixins, taint_mixins):
     def __init__(self, arch="i386", mem="128M",
-            expect_prompt=None, os_version="debian:3.2.0-4-686-pae",
-            qcow="default", extra_args=[], os="linux", generic=None):
+            expect_prompt=None, os_version=None,
+            qcow=None, extra_args=[], os="linux", generic=None):
 
         self.arch = arch
         self.mem = mem
@@ -61,13 +61,14 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
                 extra_args.extend(q.extra_args.split(" "))
 
         if self.qcow: # Otherwise we shuld be able to do a replay with no qcow but this is probably broken
-            if self.qcow == "default": # Use arch / mem / os to find a qcow - XXX: merge with generic?
-                self.qcow = pjoin(getenv("HOME"), ".panda", "%s-%s-%s.qcow" % (self.os, self.arch, mem))
+            #if self.qcow == "default": # Use arch / mem / os to find a qcow - XXX: merge with generic?
+            #    self.qcow = pjoin(getenv("HOME"), ".panda", "%s-%s-%s.qcow" % (self.os, self.arch, mem))
             if not (exists(self.qcow)):
                 print("Missing qcow '{}' Please go create that qcow and give it to moyix!".format(self.qcow))
 
         self.bindir = pjoin(panda_build, "%s-softmmu" % self.arch)
         environ["PANDA_PLUGIN_DIR"] = self.bindir+"/panda/plugins" # Set so libpanda can query, see callbacks.c:215
+        environ["PANDA_BUILD_DIR"] = panda_build
         self.panda = pjoin(self.bindir, "qemu-system-%s" % self.arch)
 
         self.libpanda_path = pjoin(self.bindir,"libpanda-%s.so" % self.arch)
@@ -77,8 +78,14 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
         # Setup argv for panda
         biospath = realpath(pjoin(self.panda,"..", "..",  "pc-bios"))
-        self.panda_args = [self.panda, "-m", self.mem, "-display", "none", "-L", biospath,
-                            self.qcow] + extra_args
+        #self.panda_args = [self.panda, "-m", self.mem, "-display", "none", "-L", biospath]
+
+        self.panda_args = [self.panda, "-L", biospath]
+
+        if self.qcow:
+            self.panda_args.append(self.qcow)
+
+        self.panda_args += extra_args
 
         # Configure serial - Always enabled for now
         self.serial_file = NamedTemporaryFile(prefix="pypanda_s").name
@@ -124,7 +131,8 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         (TODO: what? register callbacks? It's something important...) before we finish initializing
         '''
         self.libpanda.panda_set_library_mode(True)
-        self.set_os_name(self.os)
+        if self.os:
+            self.set_os_name(self.os)
 
         cenvp = ffi.new("char**", ffi.new("char[]", b""))
         len_cargs = ffi.cast("int", len(self.panda_args))
@@ -158,6 +166,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             bits = 64
             endianness = 'little'
         elif self.arch == "arm":
+            endianness = 'little' # XXX add support for arm BE
             bits = 32
         elif self.arch == "aarch64":
             bit = 64
@@ -393,7 +402,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             self.enable_memcb()
         return self.libpanda.panda_virtual_memory_write_external(env, addr, buf, length)
 
-    def callstack_callers(self, lim, cpu):
+    def callstack_callers(self, lim, cpu): # XXX move into new directory, 'callstack' ?
         if not hasattr(self, "libpanda_callstack_instr"):
             progress("enabling callstack_instr plugin")
             self.require("callstack_instr")

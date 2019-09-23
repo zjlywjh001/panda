@@ -148,15 +148,26 @@ bool _panda_load_plugin(const char *filename, const char *plugin_name, bool libr
     // Ensure pypanda is loaded so its symbols can be used in the plugin we're loading (TODO: should we move this to happen earlier (and just once?))
     if (library_mode) {
       // When running as a library, load libpanda
-      void *libpanda = dlopen("../../../build/"
+      const char *lib_dir = g_getenv("PANDA_BUILD_DIR");
+      char *library_path;
+      const char * lib_name =
 #if defined(TARGET_I386)
-          "i386-softmmu/libpanda-i386.so"
+          "/i386-softmmu/libpanda-i386.so";
 #elif defined(TARGET_x86_64)
-          "/x86_64-softmmu-softmmu/libpanda-x86_64.so"
+          "/x86_64-softmmu-softmmu/libpanda-x86_64.so";
+#elif defined(TARGET_ARM)
+          "/arm-softmmu/libpanda-arm.so";
 #else
-          "\n TODO: other architectures \n"
+          "\n TODO: other architectures \n";
 #endif
-          , RTLD_LAZY | RTLD_NOLOAD | RTLD_GLOBAL);
+
+      if (lib_dir != NULL) {
+        library_path = g_strdup_printf("%s%s", lib_dir, lib_name);
+      }else{
+        library_path = g_strdup_printf("../../../build/%s", lib_name); // XXX This is bad, need a less hardcoded path
+      }
+
+      void *libpanda = dlopen(library_path, RTLD_LAZY | RTLD_NOLOAD | RTLD_GLOBAL);
 
       if (!libpanda) {
         fprintf(stderr, "Failed to load libpanda: %s\n", dlerror());
