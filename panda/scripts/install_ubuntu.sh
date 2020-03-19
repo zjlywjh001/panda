@@ -48,7 +48,7 @@ sudo apt-get -y build-dep qemu
 progress "Installing PANDA dependencies..."
 sudo apt-get -y install python-pip git protobuf-compiler protobuf-c-compiler \
   libprotobuf-c0-dev libprotoc-dev python-protobuf libelf-dev libc++-dev pkg-config \
-  libwiretap-dev libwireshark-dev flex bison
+  libwiretap-dev libwireshark-dev flex bison python3-pip python3
 
 pushd /tmp
 
@@ -77,7 +77,7 @@ if [ "$vendor" = "Ubuntu" ]; then
   # For Ubuntu 18.04 the vendor packages are more recent than those in the PPA
   # and will be preferred.
   sudo apt-get update
-  sudo apt-get -y install libcapstone-dev libdwarf-dev python-pycparser
+  sudo apt-get -y install libcapstone-dev libdwarf-dev python-pycparser chrpath
 else
   if [ ! \( -e "/usr/local/lib/libdwarf.so" -o -e "/usr/lib/libdwarf.so" \) ]
   then

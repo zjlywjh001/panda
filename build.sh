@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Default targets to build. Change with argument. small = i386-softmmu
+TARGET_LIST="x86_64-softmmu,i386-softmmu,arm-softmmu,ppc-softmmu"
+
+# If there are arguments, the first arg is target list or 'small'. subsequent args are passed to configure
+if [ $# -ge 1 ]; then
+    if [ "$1" = "small" ]; then
+        TARGET_LIST="i386-softmmu"
+    else
+        TARGET_LIST="$1"
+    fi
+    echo "Building PANDA for target(s): $TARGET_LIST"
+    shift
+fi
+
 # Prefer greadlink over readlink if present. Important for OSX (incompatible readlink).
 if type greadlink >/dev/null 2>&1; then
     READLINK=greadlink
@@ -33,23 +47,57 @@ PANDA_NPROC=${PANDA_NPROC:-$(nproc || sysctl -n hw.ncpu)}
 # stop on any error
 set -e
 
-### Check gcc/g++ versions. 5 is currently the supported version.
+# Find paths to python2.7 and pip3
+# As part of building we need python2 for qemu and pip3 to install pypanda dependencies
+# Either use python and pip3 or use pyenv with 3.6.6 and 2.7.9
+# This is just a temporary hack until we merge with qemu 4.1 which adds supports python3
+#if which pyenv; then
+#  eval "$(pyenv init -)"
+#  pyenv shell 3.6.6 2.7.9
+#  PYTHON2PATH=$(pyenv which python2)
+#else
+PYTHON2PATH=$(which python2) # First try python2, then python
+if [ -z "${PYTHON2PATH}" ] || ! $PYTHON2PATH --version 2>&1 | grep -q 'Python 2\.7'; then
+  PYTHON2PATH=$(which python)
+  if [ -z "${PYTHON2PATH}" ] || ! $PYTHON2PATH --version 2>&1 | grep -q 'Python 2\.7'; then
+    echo "Could not find python2.7. Tried python2 and python"
+    exit 1
+  fi
+fi
+#fi
+
+msg "Using python2 at: $PYTHON2PATH"
+
+### Check gcc/g++ versions. 5 and 7 are currently  supported version.
 ### PANDA no longer builds with versions 4.x.
-### Versions >5 may not compile due to more aggressive sanitization defaults.
-GCC_TOOLCHAIN_VERSION_REQ=5
+GCC_TOOLCHAIN_VERSION_MIN=5
+GCC_TOOLCHAIN_VERSION_MAX=7
 GCC_VERSION_MAJOR=$(gcc -dumpversion | cut -d. -f1)
 GCXX_VERSION_MAJOR=$(g++ -dumpversion | cut -d. -f1)
-if [ $GCC_VERSION_MAJOR -eq $GCC_TOOLCHAIN_VERSION_REQ -a $GCXX_VERSION_MAJOR -ge $GCC_TOOLCHAIN_VERSION_REQ ]; then
+
+# If c and C++ version >= min and <= max
+if [ $GCC_VERSION_MAJOR -ge $GCC_TOOLCHAIN_VERSION_MIN ] && [ $GCXX_VERSION_MAJOR -ge $GCC_TOOLCHAIN_VERSION_MIN ] && [ $GCC_VERSION_MAJOR -le $GCC_TOOLCHAIN_VERSION_MAX ] && [ $GCXX_VERSION_MAJOR -le $GCC_TOOLCHAIN_VERSION_MAX ]; then
     msg "Building with default gcc/g++."
     COMPILER_CONFIG=""
-elif (type gcc-$GCC_TOOLCHAIN_VERSION_REQ && type g++-$GCC_TOOLCHAIN_VERSION_REQ) >/dev/null 2>&1; then
-    msg "Building with gcc-$GCC_TOOLCHAIN_VERSION_REQ/g++-$GCC_TOOLCHAIN_VERSION_REQ."
-    COMPILER_CONFIG="--cc=gcc-$GCC_TOOLCHAIN_VERSION_REQ --cxx=g++-$GCC_TOOLCHAIN_VERSION_REQ"
-elif [ $GCC_VERSION_MAJOR -lt $GCC_TOOLCHAIN_VERSION_REQ -a $GCXX_VERSION_MAJOR -lt $GCC_TOOLCHAIN_VERSION_REQ ]; then
+
+
+# If we have gcc-7 (max) installed, use it
+elif (type gcc-$GCC_TOOLCHAIN_VERSION_MAX && type g++-$GCC_TOOLCHAIN_VERSION_MAX) >/dev/null 2>&1; then
+    msg "Building with gcc-$GCC_TOOLCHAIN_VERSION_MAX/g++-$GCC_TOOLCHAIN_VERSION_MAX."
+    COMPILER_CONFIG="--cc=gcc-$GCC_TOOLCHAIN_VERSION_MAX --cxx=g++-$GCC_TOOLCHAIN_VERSION_MAX"
+
+# If we have gcc-5 (min) installed, use it
+elif (type gcc-$GCC_TOOLCHAIN_VERSION_MIN && type g++-$GCC_TOOLCHAIN_VERSION_MIN) >/dev/null 2>&1; then
+    msg "Building with gcc-$GCC_TOOLCHAIN_VERSION_MIN/g++-$GCC_TOOLCHAIN_VERSION_MIN."
+    COMPILER_CONFIG="--cc=gcc-$GCC_TOOLCHAIN_VERSION_MIN --cxx=g++-$GCC_TOOLCHAIN_VERSION_MIN"
+
+# Old GCC & G++
+elif [ $GCC_VERSION_MAJOR -lt $GCC_TOOLCHAIN_VERSION_MIN -a $GCXX_VERSION_MAJOR -lt $GCC_TOOLCHAIN_VERSION_MIN ]; then
     msg "Older gcc/g++ found. Enforcing gnu11 mode."
     COMPILER_CONFIG="--extra-cflags=-std=gnu11"
+
 else
-    msg "Modern gcc/g++ found. Trying with default. This is likely to fail!"
+    msg "Unsupported gcc/g++ found. Trying with default flags. This might fail"
     COMPILER_CONFIG=""
 fi
 
@@ -99,7 +147,7 @@ else
 fi
 
 ### Set other configuration flags, depending on environment.
-MISC_CONFIG="--python=python2 --disable-vhost-net"
+MISC_CONFIG="--python=$PYTHON2PATH --disable-vhost-net"
 if pkg-config --exists --atleast-version 4.9 xencontrol; then
     ## Enable xencontrol compat API for libxen-4.9 (Ubuntu 18.04LTS).
     MISC_CONFIG="$MISC_CONFIG --extra-cflags=-DXC_WANT_COMPAT_DEVICEMODEL_API"
@@ -122,11 +170,19 @@ if [ -f "$BUILD_LOCAL" ]; then
     . "$BUILD_LOCAL"
 fi
 
+# will install to $(pwd)/install UNLESS $prefix is set when script is run
+if [ -z "$prefix" ]; then
+    prefix="$(pwd)/install"
+    echo "Using default prefix: $prefix"
+else
+    echo "Using specified prefix: $prefix"
+fi
+
 ## Configure/compile/test.
 msg "Configuring PANDA..."
 "${PANDA_DIR_REL}/configure" \
-    --target-list=x86_64-softmmu,i386-softmmu,arm-softmmu,ppc-softmmu \
-    --prefix="$(pwd)/install" \
+    --target-list=$TARGET_LIST \
+    --prefix=$prefix \
     $COMPILER_CONFIG \
     $LLVM_CONFIG \
     $MISC_CONFIG \
